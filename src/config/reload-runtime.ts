@@ -1,5 +1,5 @@
 import { type Logger } from "../logger";
-import { loadGlobalConfig, loadGuildConfigs, validateTrimConfig } from "../config/loader";
+import { loadGlobalConfig, loadGuildConfigs, validateContextHistoryConfig } from "../config/loader";
 import type { GuildConfig } from "../config/types";
 import { type createModelImageSupportStore } from "../llm/model-image-support";
 import { resolveModelProfile } from "../llm/client";
@@ -72,7 +72,7 @@ async function reloadConfigs(): Promise<void> {
       process.env,
       configPath,
     );
-    validateTrimConfig(newGlobal.defaultTrim);
+    validateContextHistoryConfig(newGlobal.defaultContextHistory);
 
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, newGlobal);

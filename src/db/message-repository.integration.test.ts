@@ -495,9 +495,8 @@ describe("getHistoryMessages", () => {
 
 describe("getContextHistoryMessages", () => {
   const trim = {
-    trimTrigger: 10,
-    trimTarget: 8,
-    windowSize: 3,
+    retainedMessages: 8,
+    recentMessages: 3,
     messageCharLimit: 200,
   };
 
@@ -506,8 +505,8 @@ describe("getContextHistoryMessages", () => {
       insertMessage(`m${i}`, { channelId: "c1", createdAt: now + i });
     }
 
-    const atTrigger = getContextHistoryMessages(db, "c1", trim);
-    expect(atTrigger.map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
+    const beforeRollover = getContextHistoryMessages(db, "c1", trim);
+    expect(beforeRollover.map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
 
     insertMessage("m10", { channelId: "c1", createdAt: now + 10 });
     const beforeChunk = getContextHistoryMessages(db, "c1", trim);

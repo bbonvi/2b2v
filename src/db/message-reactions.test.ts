@@ -2,14 +2,13 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
 import { getContextHistoryMessages } from "./message-history-repository";
 import { deleteMessageEmojiReaction, deleteMessageReactions, upsertMessageReaction } from "./message-reactions";
-import type { TrimConfig } from "../config/types";
+import type { ContextHistoryConfig } from "../config/types";
 
 let db: Database;
 const now = Date.now();
-const trim: TrimConfig = {
-  trimTrigger: 10,
-  trimTarget: 10,
-  windowSize: 20,
+const trim: ContextHistoryConfig = {
+  retainedMessages: 20,
+  recentMessages: 20,
   messageCharLimit: 200,
 };
 

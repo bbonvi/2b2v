@@ -1,4 +1,4 @@
-import type { TrimConfig } from "../config/types.ts";
+import type { ContextHistoryConfig } from "../config/types.ts";
 import type { AssetKind, AssetSourceKind } from "../db/asset-repository.ts";
 
 export const PRIVATE_THOUGHT_MESSAGE_ID_PREFIX = "prompt-only:thought:";
@@ -68,9 +68,9 @@ export interface SliceResult {
   newer: HistoryMessage[];
 }
 
-/** Configuration for history processing, combining trim and guild settings. */
+/** Configuration for model-visible history processing and guild formatting. */
 export interface HistoryProcessingConfig {
-  trim: TrimConfig;
+  contextHistory: ContextHistoryConfig;
   mergeMessageGapSeconds: number;
   timezone: string;
   /** Discord message IDs that form the stable input span for the current actor turn. */

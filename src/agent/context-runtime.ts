@@ -351,7 +351,7 @@ async function buildContext(
     : getContextHistoryMessages(
         db,
         channelId,
-        guildConfig.trim,
+        guildConfig.contextHistory,
         appendLatestToHistory ? (excludeMessageIds ?? latestUserMessage.id) : excludeMessageIds,
       );
   const historyMessages = historyOptions.historyLimit === undefined
@@ -374,7 +374,7 @@ async function buildContext(
     historyWithoutLatest,
     appendLatestToHistory ? annotatedLatestUserMessage : null,
     {
-      trim: guildConfig.trim,
+      contextHistory: guildConfig.contextHistory,
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
       timezone: guildConfig.timezone,
       triggerMessageIds: historyOptions.triggerMessageIds,
@@ -605,7 +605,7 @@ async function buildContext(
           parentMessages.filter((message) =>
             !message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
           ),
-          guildConfig.trim.messageCharLimit,
+          guildConfig.contextHistory.messageCharLimit,
         ).flatMap((message) => [
           message,
           ...handoffs

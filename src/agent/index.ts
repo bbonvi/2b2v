@@ -40,8 +40,6 @@ export {
   type ResponseSegment,
 } from "./response-directives.ts";
 
-export { trimChatHistory } from "./context-trimming.ts";
-
 export {
   buildMemoryContext,
   type MemoryContextInput,

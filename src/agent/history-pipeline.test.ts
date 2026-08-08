@@ -22,10 +22,9 @@ function msg(overrides?: Partial<HistoryMessage>): HistoryMessage {
 }
 
 const defaultConfig = {
-  trim: {
-    trimTrigger: 150,
-    trimTarget: 100,
-    windowSize: 30,
+  contextHistory: {
+    retainedMessages: 100,
+    recentMessages: 30,
     messageCharLimit: 500,
   },
   mergeMessageGapSeconds: 120,
@@ -147,12 +146,10 @@ describe("processHistory", () => {
   });
 
   test("enough messages produce older slice with OLDER_LEGEND and date stamps", async () => {
-    // With windowSize=30, trimTarget=100: olderCount=70
-    // Need >30 messages so some go to older slice
-    // Use small config: windowSize=3, trimTarget=10, so olderCount=7
+    // Use a small recent batch so some messages enter the older slice.
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 10, windowSize: 3, trimTrigger: 20 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 10, recentMessages: 3 },
     };
 
     const messages: HistoryMessage[] = [];
@@ -179,18 +176,18 @@ describe("processHistory", () => {
   test("older cached text remains stable while recent history grows inside a chunk", async () => {
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTrigger: 400, trimTarget: 300, windowSize: 50 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 300, recentMessages: 50 },
     };
-    const latest = msg({ id: "latest", content: "latest", timestamp: 1000 + 80 * 600_000 });
-    const baseMessages = Array.from({ length: 70 }, (_, i) => msg({
+    const latest = msg({ id: "latest", content: "latest", timestamp: 1000 + 130 * 600_000 });
+    const baseMessages = Array.from({ length: 120 }, (_, i) => msg({
       id: String(i + 1),
       content: `msg-${i}`,
       timestamp: 1000 + i * 600_000,
     }));
     const grownMessages = [
       ...baseMessages,
-      msg({ id: "71", content: "extra-1", timestamp: 1000 + 70 * 600_000 }),
-      msg({ id: "72", content: "extra-2", timestamp: 1000 + 71 * 600_000 }),
+      msg({ id: "121", content: "extra-1", timestamp: 1000 + 120 * 600_000 }),
+      msg({ id: "122", content: "extra-2", timestamp: 1000 + 121 * 600_000 }),
     ];
 
     const before = await processHistory(baseMessages, latest, config, deps);
@@ -237,10 +234,10 @@ describe("processHistory", () => {
   });
 
   test("older messages ARE trimmed", async () => {
-    // windowSize=2, trimTarget=5 → olderCount=3
+    // recentMessages=2, retainedMessages=5 → older capacity=3
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20, messageCharLimit: 50 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 5, recentMessages: 2, messageCharLimit: 50 },
     };
 
     const messages: HistoryMessage[] = [];
@@ -360,7 +357,7 @@ describe("processHistory", () => {
   test("first newer reply to the last older message omits ReplyMsgID", async () => {
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 4, recentMessages: 2 },
     };
     const messages = [
       msg({ id: "1", author: "one", authorId: "uid-one", content: "one", timestamp: 1000 }),
@@ -379,11 +376,11 @@ describe("processHistory", () => {
   });
 
   test("messages split correctly between older and newer with controlled config", async () => {
-    // windowSize=2, trimTarget=5 → olderCount=3, complete older chunk=2
+    // recentMessages=2, retainedMessages=4 → older capacity=2
     // 5 messages → older gets 2, newer gets 3
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 4, recentMessages: 2 },
     };
 
     const messages: HistoryMessage[] = [];
@@ -418,7 +415,7 @@ describe("processHistory", () => {
   test("shows private thought traces only beside the recent ordinary window", async () => {
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 4, recentMessages: 2 },
     };
     const messages = Array.from({ length: 5 }, (_, index) => [
       msg({
@@ -498,11 +495,10 @@ describe("processHistory", () => {
   test("masks source handoffs and keeps destination handoffs in linked history", async () => {
     const config = {
       ...defaultConfig,
-      trim: {
-        ...defaultConfig.trim,
-        trimTarget: 5,
-        windowSize: 2,
-        trimTrigger: 20,
+      contextHistory: {
+        ...defaultConfig.contextHistory,
+        retainedMessages: 5,
+        recentMessages: 2,
         messageCharLimit: 30,
       },
     };
@@ -568,7 +564,7 @@ describe("processHistory", () => {
   test("returns visible human users newest first across older and newer history", async () => {
     const config = {
       ...defaultConfig,
-      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+      contextHistory: { ...defaultConfig.contextHistory, retainedMessages: 5, recentMessages: 2 },
     };
     const messages = [
       msg({ id: "1", author: "old", authorId: "uid-old", content: "old", timestamp: 1000 }),

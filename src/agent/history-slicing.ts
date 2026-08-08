@@ -1,5 +1,6 @@
 import type { HistoryMessage, SliceResult } from "./history-types.ts";
-import type { TrimConfig } from "../config/types.ts";
+import type { ContextHistoryConfig } from "../config/types.ts";
+import { contextHistoryDropCount, contextHistoryOlderSize } from "../context-history.ts";
 
 /**
  * Sort messages by timestamp ascending, breaking ties by message ID ascending.
@@ -17,15 +18,14 @@ export function sortMessages(messages: HistoryMessage[]): HistoryMessage[] {
  * Deterministic slicing algorithm per spec.
  *
  * Given a chronological list of messages (already sorted, latest user message excluded):
- * - olderCount = trimTarget - windowSize
  * - N == 0 → both slices empty
- * - Older history grows only in window-sized chunks, then caps at olderCount.
- * - Recent history gets the in-progress chunk after the last complete cached chunk.
- * - N >= trimTrigger → drop old messages in window-sized chunks before splitting.
+ * - Recent history keeps at least recentMessages after enough history exists.
+ * - Older history grows in recentMessages-sized cache batches, then caps.
+ * - Each rollover drops one oldest batch and promotes one recent batch.
  */
 export function sliceHistory(
   sorted: HistoryMessage[],
-  trim: TrimConfig,
+  config: ContextHistoryConfig,
 ): SliceResult {
   const N = sorted.length;
 
@@ -33,21 +33,9 @@ export function sliceHistory(
     return { older: [], newer: [] };
   }
 
-  const { trimTrigger, trimTarget, windowSize } = trim;
-  const olderCount = trimTarget - windowSize;
-  const maxChunkedOlderSize = Math.floor(olderCount / windowSize) * windowSize;
-  const dropCount = (() => {
-    if (N < trimTrigger) return 0;
-    const overage = N - trimTarget;
-    return Math.floor(overage / windowSize) * windowSize;
-  })();
-
+  const dropCount = contextHistoryDropCount(N, config);
   const trimmed = sorted.slice(dropCount);
-  const desiredOlderSize = Math.max(0, trimmed.length - 1);
-  const olderSize = Math.min(
-    maxChunkedOlderSize,
-    Math.floor(desiredOlderSize / windowSize) * windowSize,
-  );
+  const olderSize = contextHistoryOlderSize(trimmed.length, config);
 
   return {
     older: trimmed.slice(0, olderSize),

@@ -344,11 +344,13 @@ export interface TriggerConfig {
   typingMaxWaitMs: number;
 }
 
-/** Context window trimming thresholds (message count). */
-export interface TrimConfig {
-  trimTrigger: number;
-  trimTarget: number;
-  windowSize: number;
+/** Message-count limits for the model-visible channel history. */
+export interface ContextHistoryConfig {
+  /** Total messages kept immediately after a rollover. */
+  retainedMessages: number;
+  /** Minimum recent tail and rollover batch size. */
+  recentMessages: number;
+  /** Maximum content length for bounded history rows. */
   messageCharLimit: number;
 }
 
@@ -540,7 +542,7 @@ export interface GuildConfig {
   triggers: TriggerConfig;
   modelProfile: string;
   timezone: string;
-  trim: TrimConfig;
+  contextHistory: ContextHistoryConfig;
   adminUserIds: string[];
   mergeMessageGapSeconds: number;
   imageReferenceMaxPerCall: number;
@@ -597,7 +599,7 @@ export interface GlobalConfig {
   /** Default profile used by normal visible agent turns. */
   defaultModelProfile: string;
   defaultTimezone: string;
-  defaultTrim: TrimConfig;
+  defaultContextHistory: ContextHistoryConfig;
   defaultTriggers: TriggerConfig;
   defaultMergeMessageGapSeconds: number;
   defaultImageReferenceMaxPerCall: number;
@@ -664,7 +666,7 @@ export interface GuildConfigYaml {
   triggers?: Partial<TriggerConfig>;
   modelProfile?: string;
   timezone?: string;
-  trim?: Partial<TrimConfig>;
+  contextHistory?: Partial<ContextHistoryConfig>;
   adminUserIds?: string[];
   mergeMessageGapSeconds?: number;
   imageReferenceMaxPerCall?: number;
@@ -731,7 +733,7 @@ export interface MainConfigYaml {
   modelProfiles?: Record<string, ModelProfileConfigYaml>;
   modelProfile?: string;
   timezone?: string;
-  trim?: Partial<TrimConfig>;
+  contextHistory?: Partial<ContextHistoryConfig>;
   triggers?: Partial<TriggerConfig>;
   mergeMessageGapSeconds?: number;
   imageReferenceMaxPerCall?: number;

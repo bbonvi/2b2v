@@ -2,7 +2,7 @@ import { createLogger, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { parseDashboardPasswordlessCidrs } from "./dashboard/auth";
 import { startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateContextHistoryConfig, validateVpnConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
@@ -80,7 +80,7 @@ const profileDir = join(profilesDir, profile);
 const configPath = requireProfileConfigPath(profilesDir, profile);
 const guildsDir = join(profileDir, "guilds");
 let globalConfig = loadGlobalConfig(process.env, configPath);
-validateTrimConfig(globalConfig.defaultTrim);
+validateContextHistoryConfig(globalConfig.defaultContextHistory);
 validateVpnConfig(globalConfig.vpn);
 log.info("profile loaded", {
   profile,

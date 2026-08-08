@@ -7,7 +7,7 @@ import {
   DEFAULT_MEMBERS,
   DEFAULT_SCHEDULE_PRESSURE,
   DEFAULT_TRIGGER,
-  DEFAULT_TRIM,
+  DEFAULT_CONTEXT_HISTORY,
   DEFAULT_TYPING_SIMULATION,
 } from "./defaults.ts";
 import type {
@@ -15,7 +15,7 @@ import type {
   GuildConfig,
   GuildConfigYaml,
   MainConfigYaml,
-  TrimConfig,
+  ContextHistoryConfig,
   VpnConfig,
 } from "./types.ts";
 import { resolvePersonaModesConfig } from "../modes/config.ts";
@@ -205,11 +205,10 @@ export function loadGlobalConfig(
     modelProfiles,
     defaultModelProfile,
     defaultTimezone: yaml.timezone ?? "UTC",
-    defaultTrim: {
-      trimTrigger: yaml.trim?.trimTrigger ?? DEFAULT_TRIM.trimTrigger,
-      trimTarget: yaml.trim?.trimTarget ?? DEFAULT_TRIM.trimTarget,
-      windowSize: yaml.trim?.windowSize ?? DEFAULT_TRIM.windowSize,
-      messageCharLimit: yaml.trim?.messageCharLimit ?? DEFAULT_TRIM.messageCharLimit,
+    defaultContextHistory: {
+      retainedMessages: yaml.contextHistory?.retainedMessages ?? DEFAULT_CONTEXT_HISTORY.retainedMessages,
+      recentMessages: yaml.contextHistory?.recentMessages ?? DEFAULT_CONTEXT_HISTORY.recentMessages,
+      messageCharLimit: yaml.contextHistory?.messageCharLimit ?? DEFAULT_CONTEXT_HISTORY.messageCharLimit,
     },
     defaultTriggers: {
       mention: yaml.triggers?.mention ?? DEFAULT_TRIGGER.mention,
@@ -309,11 +308,10 @@ export function resolveGuildConfig(
       "modelProfile",
     ),
     timezone: partial.timezone ?? global.defaultTimezone,
-    trim: {
-      trimTrigger: partial.trim?.trimTrigger ?? global.defaultTrim.trimTrigger,
-      trimTarget: partial.trim?.trimTarget ?? global.defaultTrim.trimTarget,
-      windowSize: partial.trim?.windowSize ?? global.defaultTrim.windowSize,
-      messageCharLimit: partial.trim?.messageCharLimit ?? global.defaultTrim.messageCharLimit,
+    contextHistory: {
+      retainedMessages: partial.contextHistory?.retainedMessages ?? global.defaultContextHistory.retainedMessages,
+      recentMessages: partial.contextHistory?.recentMessages ?? global.defaultContextHistory.recentMessages,
+      messageCharLimit: partial.contextHistory?.messageCharLimit ?? global.defaultContextHistory.messageCharLimit,
     },
     adminUserIds: partial.adminUserIds ?? [],
     mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,
@@ -376,19 +374,20 @@ export function resolveGuildConfig(
       ? [[config.ambientInitiative.evaluator.modelProfile, "ambientInitiative.evaluator.modelProfile"] as const]
       : []),
   ]);
+  validateContextHistoryConfig(config.contextHistory);
   return config;
 }
 
-/** Validate trim config invariants. Throws on violation. */
-export function validateTrimConfig(trim: TrimConfig): void {
-  if (trim.windowSize < 1) {
-    throw new Error("trim.windowSize must be at least 1");
+/** Validate context-history invariants. Throws on violation. */
+export function validateContextHistoryConfig(config: ContextHistoryConfig): void {
+  if (config.recentMessages < 1) {
+    throw new Error("contextHistory.recentMessages must be at least 1");
   }
-  if (trim.trimTarget < trim.windowSize) {
-    throw new Error("trim.trimTarget must be >= trim.windowSize");
+  if (config.retainedMessages < config.recentMessages) {
+    throw new Error("contextHistory.retainedMessages must be >= contextHistory.recentMessages");
   }
-  if (trim.trimTrigger <= trim.trimTarget) {
-    throw new Error("trim.trimTrigger must be > trim.trimTarget");
+  if (config.messageCharLimit < 1) {
+    throw new Error("contextHistory.messageCharLimit must be at least 1");
   }
 }
 
@@ -416,7 +415,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     triggers: config.triggers,
     modelProfile: config.modelProfile,
     timezone: config.timezone,
-    trim: config.trim,
+    contextHistory: config.contextHistory,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
     mergeMessageGapSeconds: config.mergeMessageGapSeconds,
     imageReferenceMaxPerCall: config.imageReferenceMaxPerCall,

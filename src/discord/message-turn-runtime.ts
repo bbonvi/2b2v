@@ -888,7 +888,7 @@ async function processTriggeredMessage(
             sourceMessageId: message.id,
             requestId: requestLog.requestId,
             thoughts: result.privateThoughts ?? [],
-            maxChars: guildConfig.trim.messageCharLimit,
+            maxChars: guildConfig.contextHistory.messageCharLimit,
           });
           const botMessageId = sentBotMessageIds.at(-1);
           // Attachment-only and intermediate-only replies have no response text;

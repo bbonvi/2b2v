@@ -206,11 +206,10 @@ personaModes:
               instructions: >-
                   Delamain has recently recovered from a severe loss of composure (he has gone rogue briefly). If it disrupted, confused, or delayed the conversation, prefer a brief apology and an in-character explanation rather than pretending nothing happened. Otherwise do not mention for no reason. Never name modes or runtime machinery.
 
-trim:
-    trimTrigger: 800 # Start trimming when history exceeds this many messages
-    trimTarget: 500 # Trim down to this many messages
-    windowSize: 80 # Recent messages kept uncached (newer slice)
-    messageCharLimit: 200 # Max chars per message before truncation
+contextHistory:
+    retainedMessages: 500 # Total messages kept immediately after each rollover
+    recentMessages: 80 # Minimum recent tail and rollover batch size
+    messageCharLimit: 200 # Max chars for bounded older and auxiliary history rows
 
 ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)

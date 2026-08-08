@@ -2,7 +2,8 @@ import type { Database } from "./database";
 
 import { PRIVATE_HANDOFF_MESSAGE_ID_PREFIX, PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "../agent/history-types";
 
-import type { TrimConfig } from "../config/types";
+import type { ContextHistoryConfig } from "../config/types";
+import { contextHistoryDropCount } from "../context-history";
 
 import type { AssetKind, AssetSourceKind } from "./asset-repository.ts";
 
@@ -155,11 +156,8 @@ export function getHistoryMessages(
 
 /** Count human channel messages by fixed time bucket for ambient activity baselines. */
 
-function chunkedHistoryTakeCount(totalMessages: number, trim: TrimConfig): number {
-  if (totalMessages < trim.trimTrigger) return totalMessages;
-  const overage = totalMessages - trim.trimTarget;
-  const dropCount = Math.floor(overage / trim.windowSize) * trim.windowSize;
-  return totalMessages - dropCount;
+function chunkedHistoryTakeCount(totalMessages: number, config: ContextHistoryConfig): number {
+  return totalMessages - contextHistoryDropCount(totalMessages, config);
 }
 
 function compareHistoryRows(left: HistoryRow, right: HistoryRow): number {
@@ -194,13 +192,13 @@ function linkedPrivateHandoffRows(
  *
  * Unlike getHistoryMessages(limit), this keeps the oldest included row stable
  * while new messages arrive, and only advances the context window in
- * windowSize chunks. That keeps the cached older-history prompt block from
- * being invalidated on every user reply once a channel is past trimTrigger.
+ * recentMessages-sized batches. That keeps the cached older-history prompt
+ * block from being invalidated on every user reply.
  */
 export function getContextHistoryMessages(
   db: Database,
   channelId: string,
-  trim: TrimConfig,
+  config: ContextHistoryConfig,
   excludeMessageIds?: string | readonly string[],
 ): HistoryMessage[] {
   const excludedIds = typeof excludeMessageIds === "string"
@@ -215,7 +213,7 @@ export function getContextHistoryMessages(
       WHERE channel_id = ? AND id NOT LIKE ? AND id NOT LIKE ?${excludeClause}`)
     .get(...params) as { count: number } | null;
   const totalMessages = countRow?.count ?? 0;
-  const takeCount = chunkedHistoryTakeCount(totalMessages, trim);
+  const takeCount = chunkedHistoryTakeCount(totalMessages, config);
   if (takeCount <= 0) return [];
 
   const rows = db.raw

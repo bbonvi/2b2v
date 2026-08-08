@@ -70,10 +70,10 @@ export async function processHistory(
   );
 
   // 3. Slice into older/newer
-  const { older, newer } = sliceHistory(merged, config.trim);
+  const { older, newer } = sliceHistory(merged, config.contextHistory);
 
   // 4. Trim older slice only (newer messages kept intact for recency)
-  const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
+  const olderTrimmed = trimMessages(older, config.contextHistory.messageCharLimit);
   const newerTrimmed = newer;
   const recentMessageIds = new Set(newerTrimmed.flatMap((message) =>
     message.mergedMessageIds ?? [message.id]

@@ -10,7 +10,7 @@ import {
   resolveGuildConfig,
   resolveInstructions,
   saveGuildConfig,
-  validateTrimConfig,
+  validateContextHistoryConfig,
   validateVpnConfig,
 } from "./loader.ts";
 
@@ -545,19 +545,17 @@ describe("guild resolution and persistence", () => {
 });
 
 describe("validation helpers", () => {
-  test("validates trim ordering", () => {
-    expect(() => validateTrimConfig({
-      trimTrigger: 200,
-      trimTarget: 150,
-      windowSize: 20,
+  test("validates context-history limits", () => {
+    expect(() => validateContextHistoryConfig({
+      retainedMessages: 150,
+      recentMessages: 20,
       messageCharLimit: 200,
     })).not.toThrow();
-    expect(() => validateTrimConfig({
-      trimTrigger: 150,
-      trimTarget: 150,
-      windowSize: 20,
+    expect(() => validateContextHistoryConfig({
+      retainedMessages: 20,
+      recentMessages: 21,
       messageCharLimit: 200,
-    })).toThrow("trimTrigger must be > trim.trimTarget");
+    })).toThrow("retainedMessages must be >= contextHistory.recentMessages");
   });
 
   test("validates enabled VPN configuration", () => {

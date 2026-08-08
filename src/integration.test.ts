@@ -11,9 +11,6 @@ import { createDatabase, type Database } from "./db/database.ts";
 import { createMemory, getMemory, listMemories } from "./db/memory-repository.ts";
 import { createSchedule, getSchedule, listSchedules } from "./db/schedule-repository.ts";
 import { createScheduleTaskTool } from "./agent/schedule-tool.ts";
-import { trimChatHistory } from "./agent/context-trimming.ts";
-import type { ChatMessage } from "./agent/prompt.ts";
-import type { TrimConfig } from "./config/types.ts";
 
 const GUILD_ID = "guild-integration-1";
 const CHANNEL_ID = "channel-1";
@@ -180,22 +177,6 @@ describe("schedule tool → DB roundtrip", () => {
 
     const sources = listSchedules(db, { guildId: GUILD_ID }).map((entry) => entry.source).sort();
     expect(sources).toEqual(["admin", "tool"]);
-  });
-});
-
-describe("trigger → trimming pipeline", () => {
-  test("context trimming preserves newest messages when over trigger", () => {
-    const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200 };
-    const messages: ChatMessage[] = Array.from({ length: 12 }, (_, index) => ({
-      author: `user-${index}`,
-      content: `message-${index}`,
-      isBot: index % 2 === 0,
-    }));
-
-    const trimmed = trimChatHistory(messages, trim);
-    expect(trimmed).toHaveLength(5);
-    expect(trimmed[0]?.content).toBe("message-7");
-    expect(trimmed[4]?.content).toBe("message-11");
   });
 });
 

@@ -231,11 +231,10 @@ personaModes:
           presence:
               status: dnd
 
-trim:
-    trimTrigger: 800 # Start trimming when history exceeds this many messages
-    trimTarget: 600 # Trim down to this many messages
-    windowSize: 100 # Recent messages kept uncached (newer slice)
-    messageCharLimit: 300 # Max chars per message before truncation
+contextHistory:
+    retainedMessages: 600 # Total messages kept immediately after each rollover
+    recentMessages: 100 # Minimum recent tail and rollover batch size
+    messageCharLimit: 300 # Max chars for bounded older and auxiliary history rows
 
 # Background memory extraction
 memoryExtraction:

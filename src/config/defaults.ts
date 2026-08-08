@@ -22,7 +22,7 @@ import type {
   ReplyLoopConfig,
   SchedulePressureConfig,
   TriggerConfig,
-  TrimConfig,
+  ContextHistoryConfig,
   TypingSimulationConfig,
 } from "./types.ts";
 import type { VoicePreset } from "../tts/types.ts";
@@ -38,10 +38,9 @@ export const DEFAULT_TRIGGER: TriggerConfig = {
   typingMaxWaitMs: 15000,
 };
 
-export const DEFAULT_TRIM: TrimConfig = {
-  trimTrigger: 200,
-  trimTarget: 150,
-  windowSize: 20,
+export const DEFAULT_CONTEXT_HISTORY: ContextHistoryConfig = {
+  retainedMessages: 150,
+  recentMessages: 20,
   messageCharLimit: 200,
 };
 

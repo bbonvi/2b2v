@@ -3,7 +3,7 @@ export type {
   GuildConfig,
   GuildConfigYaml,
   TriggerConfig,
-  TrimConfig,
+  ContextHistoryConfig,
   AppConfig,
 } from "./types.ts";
 
