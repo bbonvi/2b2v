@@ -351,7 +351,7 @@ ambientInitiative:
     recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
     quietWindowMs: 600000 # (minimum quiet after human activity before opportunity)
-    botCooldownMs: 2700000 # (soft resistance window after visible 2B output)
+    botCooldownMs: 3600000 # (soft resistance window after visible 2B output)
     basePressure: 0.16 # (nominal opportunity pressure before room and inner-thread signals)
     probabilityThreshold: 0.5 # (minimum evaluator wake probability)
     confidenceThreshold: 0.6 # (minimum evaluator confidence)
