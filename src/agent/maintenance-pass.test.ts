@@ -5,7 +5,7 @@ import { splitDeferredTools } from "../../node_modules/@earendil-works/pi-ai/dis
 import { createHash } from "node:crypto";
 import { handleMessage } from "./handler.ts";
 import { runSilentMemoryAgentPass, runSilentToolAgentPass } from "./maintenance-pass.ts";
-import { hasMaintenanceMaterial, type ChatCompleteFn } from "./turn-types.ts";
+import { hasMaintenanceMaterial, type ChatCompleteFn, type MaintenancePromptContext } from "./turn-types.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
 import { buildCodexContext } from "../llm/codex-chat.ts";
 import { TEST_RUNTIME_PROMPTS, makeCodexGlobal, makeContext, makeDeps, makeGlobalConfig, makeGuildConfig, makeMessage, makePromptTransportConfig } from "./handler-test-support.ts";
@@ -592,13 +592,19 @@ describe("handleMessage", () => {
     const searchTools = makeTool("search_tools");
     const writerNames = ["record_memory", "record_relationship", "record_inner_threads"];
     const tools = [searchTools, ...writerNames.map(makeTool)];
-    const placements: Array<{ promptCacheKey?: string; immediate: string[]; deferred: string[] }> = [];
+    const placements: Array<{
+      promptCacheKey?: string;
+      immediate: string[];
+      deferred: string[];
+      messages: OpenRouterMessage[];
+    }> = [];
     const completeChat: ChatCompleteFn = (request) => {
       const placement = splitDeferredTools(buildCodexContext(request), true);
       placements.push({
         ...(request.promptCacheKey !== undefined ? { promptCacheKey: request.promptCacheKey } : {}),
         immediate: placement.immediate.map((tool) => tool.name),
         deferred: [...placement.deferred.keys()],
+        messages: structuredClone(request.messages),
       });
       return Promise.resolve({
         text: "",
@@ -636,12 +642,18 @@ describe("handleMessage", () => {
       completeChat,
     };
 
+    let transcript: OpenRouterMessage[] = common.transcript;
+    let promptContext: MaintenancePromptContext | undefined = common.promptContext;
     for (const writerName of writerNames) {
-      await runSilentToolAgentPass({
+      const result = await runSilentToolAgentPass({
         ...common,
+        transcript,
+        promptContext,
         controlMessage: `${writerName} maintenance`,
         terminateAfterSuccessfulToolRoundNames: [writerName],
       });
+      transcript = result.transcript;
+      promptContext = result.promptContext ?? promptContext;
     }
 
     expect(placements.map((placement) => placement.immediate)).toEqual([
@@ -649,9 +661,16 @@ describe("handleMessage", () => {
       ["search_tools"],
       ["search_tools"],
     ]);
-    expect(placements.map((placement) => placement.deferred)).toEqual(writerNames.map((name) => [name]));
+    expect(placements.map((placement) => placement.deferred)).toEqual([
+      ["record_memory"],
+      ["record_memory", "record_relationship"],
+      ["record_memory", "record_relationship", "record_inner_threads"],
+    ]);
     expect(new Set(placements.map((placement) => placement.promptCacheKey)).size).toBe(1);
     expect(placements[0]?.promptCacheKey).toMatch(/^2b2v:prompt:/);
+    expect(JSON.stringify(placements[1]?.messages)).toContain("record_memory maintenance");
+    expect(JSON.stringify(placements[2]?.messages)).toContain("record_relationship maintenance");
+    expect(promptContext.model).toBe("gpt-5.6-luna");
   });
 
   test("incompatible maintenance models receive portable raw actor evidence", async () => {

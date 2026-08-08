@@ -128,6 +128,14 @@ function toolsForMaintenancePass(
   return [...byName.values()];
 }
 
+function continueMaintenance(
+  request: MemoryExtractionRequest,
+  result: Awaited<ReturnType<typeof runSilentToolAgentPass>>,
+): void {
+  request.maintenanceTranscript = result.transcript;
+  if (result.promptContext !== undefined) request.promptContext = result.promptContext;
+}
+
 function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: string; args: unknown }> | undefined): AgentTool {
   if (dryRuns === undefined || tool.name !== "record_memory") return tool;
   return {
@@ -280,7 +288,7 @@ async function runMemoryPostReplyExtraction(input: {
     contextInstruction: getPromptBundle().runtime.contextTemplates["memory-other-visible-users"],
   });
   try {
-    await runSilentMemoryAgentPass({
+    const result = await runSilentMemoryAgentPass({
       globalConfig: getGlobalConfig(),
       guildConfig: input.guildConfig,
       context: input.memoryRequest.context,
@@ -304,6 +312,7 @@ async function runMemoryPostReplyExtraction(input: {
       requestLog: memoryLog,
       log: log.child({ guildId, channelId, requestId: memoryLog.requestId, component: "memory-pass" }),
     });
+    continueMaintenance(input.memoryRequest, result);
     if (input.dryRun !== true) {
       const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
         guildId,
@@ -435,7 +444,7 @@ async function runRelationshipPostReplyExtraction(input: {
         "Submit every useful relationship signal as one complete record_relationship signal list. Retry only if the tool reports an error, and retry only rejected signals.",
       ].join("\n"),
     );
-    await runSilentToolAgentPass({
+    const result = await runSilentToolAgentPass({
       globalConfig: getGlobalConfig(),
       guildConfig: input.guildConfig,
       context: input.memoryRequest.context,
@@ -467,6 +476,7 @@ async function runRelationshipPostReplyExtraction(input: {
       requestLog: relationshipsLog,
       log: log.child({ guildId, channelId, requestId: relationshipsLog.requestId, component: "relationships-pass" }),
     });
+    continueMaintenance(input.memoryRequest, result);
   } catch (err) {
     relationshipsLog.setError(err instanceof Error ? err.message : String(err));
     throw err;
@@ -528,7 +538,7 @@ async function runInnerThreadPostReplyExtraction(input: {
     resolveGuildId: (otherGuildId) => client.guilds.cache.get(otherGuildId)?.name,
   });
   try {
-    await runSilentToolAgentPass({
+    const result = await runSilentToolAgentPass({
       globalConfig: getGlobalConfig(),
       guildConfig: input.guildConfig,
       context: input.memoryRequest.context,
@@ -567,6 +577,7 @@ async function runInnerThreadPostReplyExtraction(input: {
       requestLog,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId, component: "inner-thread-pass" }),
     });
+    continueMaintenance(input.memoryRequest, result);
   } catch (error) {
     requestLog.setError(error instanceof Error ? error.message : String(error));
     throw error;
@@ -675,7 +686,7 @@ async function runPrivateLifeEpisodeSummary(input: {
   maintenanceLog.setAgentRan(true);
   requestLogStore.incrementActive();
   try {
-    await runSilentToolAgentPass({
+    const result = await runSilentToolAgentPass({
       globalConfig: getGlobalConfig(),
       guildConfig: input.guildConfig,
       context: input.request.context,
@@ -704,6 +715,7 @@ async function runPrivateLifeEpisodeSummary(input: {
       requestLog: maintenanceLog,
       log: log.child({ component: "private-life-summary", episodeId: input.episodeId }),
     });
+    continueMaintenance(input.request, result);
   } catch (error) {
     maintenanceLog.setError(error instanceof Error ? error.message : String(error));
     throw error;

@@ -8,7 +8,7 @@ import type { OpenRouterMessage, OpenRouterToolCall } from "../llm/types.ts";
 import { prependStableSectionsToCodexPayload, prependStableSectionsToPayload } from "./prompt-cache.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
 import { initialMaintenanceToolNames } from "./tool-catalog.ts";
-import type { IncomingMessage, SilentMemoryAgentInput, SilentToolAgentInput } from "./turn-types.ts";
+import type { IncomingMessage, MaintenancePromptContext, SilentMemoryAgentInput, SilentToolAgentInput } from "./turn-types.ts";
 import { AgentTimeBudgetExceededError } from "./model-retry.ts";
 import { runNativeToolLoop, toolMessage } from "./model-loop.ts";
 import { textFromMessageParts } from "./image-fallback.ts";
@@ -125,6 +125,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   text: string;
   transcript: OpenRouterMessage[];
   activeToolNames: string[];
+  promptContext?: MaintenancePromptContext;
 }> {
   if (input.tools.length === 0) {
     return { text: "", transcript: [...(input.transcript ?? [])], activeToolNames: [] };
@@ -310,7 +311,29 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
             activeToolNames = activeTools.map((tool) => tool.name);
           },
     });
-    return { text: result.text, transcript: messages, activeToolNames };
+    const activeTools = activeToolNames
+      .map((name) => timedToolsByName.get(name))
+      .filter((tool): tool is AgentTool => tool !== undefined);
+    return {
+      text: result.text,
+      transcript: messages,
+      activeToolNames,
+      promptContext: {
+        provider,
+        model: model.id,
+        transport,
+        stableSections,
+        initialRoles,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(promptCacheKey !== undefined ? { promptCacheKey } : {}),
+        promptCaching,
+        toolContractSignature: toolContractSignature(activeTools),
+        activeToolNames,
+        ...(canReuseInheritedTranscript && inheritedPrompt.loadedSkillIds !== undefined
+          ? { loadedSkillIds: [...inheritedPrompt.loadedSkillIds] }
+          : {}),
+      },
+    };
   } finally {
     clearTimeout(wallTimeout);
     if (parent !== undefined && onParentAbort !== undefined) {
@@ -320,8 +343,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
 }
 
 /** Run the post-reply memory maintenance loop with only memory tools and no Discord output hooks. */
-export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): Promise<void> {
-  await runSilentToolAgentPass({
+export async function runSilentMemoryAgentPass(
+  input: SilentMemoryAgentInput,
+): ReturnType<typeof runSilentToolAgentPass> {
+  return await runSilentToolAgentPass({
     ...input,
     runtimeInstruction: buildRuntimeInstruction(input.runtimePrompts),
     controlMessage: memoryPassControlMessage(input),
