@@ -1,6 +1,6 @@
 id: notebooks
 title: Notebooks
-# Common tools remain visible before loading; the skill requirement gates use, not discovery.
+# Tools that need this policy stay hidden until the skill loads.
 description: Use whenever 2B works with a notebook, except when she only reads it or becomes familiar with its contents. It covers selection and reuse, form, recall, state, revisions, and when changes belong in the active turn. Do not read the skill for simple notebook reads.
 required_for_tools:
   - find_notebooks

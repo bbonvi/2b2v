@@ -54,10 +54,16 @@ const skills: PromptSkillBundle = {
 describe("ToolCatalog", () => {
   test("keeps the chat-first surface active and defers uncommon tools", () => {
     const tools = [
+      tool("delete_own_message"),
+      tool("edit_own_message"),
+      tool("instruct_voice_channel"),
+      tool("join_voice_channel"),
+      tool("leave_voice_channel"),
       tool("load_skill"),
       tool("search_tools"),
       tool("react_to_message"),
       tool("read_asset"),
+      tool("read_user_avatar"),
       tool("web_search"),
       tool("fetch_url"),
       tool("schedule_task"),
@@ -82,7 +88,7 @@ describe("ToolCatalog", () => {
       .toEqual(["custom_profile_action"]);
   });
 
-  test("keeps common notebook tools visible initially but defers management and revision history", () => {
+  test("keeps simple notebook reads visible and defers notebook work", () => {
     const tools = [
       tool("find_notebooks"),
       tool("search_notebook"),
@@ -91,12 +97,7 @@ describe("ToolCatalog", () => {
       tool("manage_notebook"),
       tool("list_notebook_revisions"),
     ];
-    expect([...initialActorToolNames(tools)]).toEqual([
-      "find_notebooks",
-      "search_notebook",
-      "read_notebook",
-      "patch_notebook",
-    ]);
+    expect([...initialActorToolNames(tools)]).toEqual(["read_notebook"]);
   });
 
   test("adds registered tools once and never activates unknown names", () => {
