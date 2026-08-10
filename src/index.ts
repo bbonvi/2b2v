@@ -809,6 +809,7 @@ async function shutdown(signal: string): Promise<void> {
   for (const dispatcher of dispatchers.values()) dispatcher.dispose();
   dispatchers.clear();
   await client.destroy();
+  requestLogStore.close();
   db.close();
 
   log.info("shutdown complete");

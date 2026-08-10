@@ -10,6 +10,7 @@ services:
       CODEX_AUTH_PATH: ${CODEX_AUTH_PATH:-/app/data/codex-auth.json}
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      LOG_DIR: /app/logs
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       UNSAFELY_BYPASS_DASHBOARD_AUTH: ${UNSAFELY_BYPASS_DASHBOARD_AUTH:-false}
@@ -21,6 +22,7 @@ services:
       WORKSPACE_STAGING_DIR: /app/workspace-staging
     volumes:
       - bot-data:/app/data
+      - request-logs:/app/logs
       - ./profiles:/app/profiles:ro
       - workspace-control:/run/2b2v
       - workspace-staging:/app/workspace-staging
@@ -47,6 +49,7 @@ services:
 
 volumes:
   bot-data:
+  request-logs:
   workspace-data:
   workspace-control:
   workspace-staging:

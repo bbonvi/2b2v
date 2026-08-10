@@ -42,6 +42,8 @@ Do not run multiple stacks with the same Discord bot token unless they should co
 
 Compose also starts a persistent root workspace for the 2B profile. It has outbound internet but no application-service network, bot data volume, database, host network, or Docker socket. The bot controls it through a Unix socket on a shared control volume. `/workspace` persists across rebuilds; `/workspace/staged-assets` is a shared temporary exchange with the bot.
 
+The dashboard keeps all completed request logs in an indexed SQLite database on its separate request-log volume. Set `LOG_DIR` when running outside Compose to keep these logs across restarts; leave it empty for process-local logs.
+
 ## Environment
 
 Required: `DISCORD_TOKEN` and credentials for every provider declared in `modelProfiles`.

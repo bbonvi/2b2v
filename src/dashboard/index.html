@@ -2250,6 +2250,10 @@
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
+  function fmtLogStart(iso) {
+    return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
   function fmtDuration(ms) {
     if (ms < 1000) return ms + 'ms';
     return (ms / 1000).toFixed(1) + 's';
@@ -3042,10 +3046,15 @@
     const requestQuery = currentLogParams().toString();
     const r = await fetch('/api/log-groups?' + requestQuery);
     if (r.status === 401) { location.href = '/login'; return; }
-    const data = await r.json();
+    const body = await r.json();
     if (currentLogParams().toString() !== requestQuery) return;
+    const data = body.groups || [];
+    const totals = body.totals || {};
 
-    logCount.textContent = data.length + ' message lifecycles';
+    const cost = totals.estimatedCostUsd == null ? '$0.0000' : '$' + Number(totals.estimatedCostUsd).toFixed(4);
+    const since = totals.firstRecordedAt == null ? '' : ' · since ' + fmtLogStart(totals.firstRecordedAt);
+    logCount.textContent = cost + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
+      + (totals.groupCount || 0) + ' message lifecycles' + since;
     if (data.length === 0) {
       rowNodes.clear();
       detailRenderedHtml.clear();

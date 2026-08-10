@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { Database as BunDatabase, type Statement } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { RequestToolCall, RequestLLMCall } from "../logger";
 
 export interface RequestLogEntry {
@@ -62,6 +64,18 @@ export interface RequestLogGroupDetail extends RequestLogGroupSummary {
   entries: Array<{ summary: RequestLogSummary; entry: RequestLogEntry }>;
 }
 
+export interface RequestLogTotals {
+  requestCount: number;
+  groupCount: number;
+  estimatedCostUsd: number | null;
+  firstRecordedAt: string | null;
+}
+
+export interface RequestLogGroupPage {
+  groups: RequestLogGroupSummary[];
+  totals: RequestLogTotals;
+}
+
 export interface RequestLogFilters {
   guildId?: string;
   channelId?: string;
@@ -83,119 +97,212 @@ const BASE64_PLACEHOLDER_MIN_LENGTH = 1_024;
 const BASE64_SAMPLE_LENGTH = 4_096;
 const BASE64_FIELD_NAMES = new Set(["base64", "b64json", "data", "image", "imageurl"]);
 
+interface RequestLogGroupKey {
+  groupId: string;
+  scope: "message" | "trigger";
+  sourceMessageId?: string;
+}
+
+interface StoredRequestSummary {
+  key: RequestLogGroupKey;
+  summary: RequestLogSummary;
+}
+
+interface StoredRequestDetail extends StoredRequestSummary {
+  entry: RequestLogEntry;
+}
+
+interface StoredLogRow {
+  group_id: string;
+  group_scope: "message" | "trigger";
+  source_message_id: string | null;
+  summary_json: string;
+}
+
+interface StoredDetailRow extends StoredLogRow {
+  entry_json: string;
+}
+
+interface LogFilterQuery {
+  where: string;
+  and: string;
+  params: string[];
+}
+
+type InsertRequestLogParams = [
+  string,
+  string,
+  "message" | "trigger",
+  string | null,
+  string,
+  string,
+  string,
+  string,
+  number | null,
+  string,
+  string,
+];
+
+interface StoredGroupKeyRow {
+  group_id: string;
+  group_scope: "message" | "trigger";
+  source_message_id: string | null;
+}
+
+/** Stores live requests in memory and completed dashboard logs in indexed SQLite rows. */
 export class RequestLogStore {
-  private readonly entries: RequestLogEntry[];
-  private readonly maxEntries: number;
-  private readonly filePath?: string;
-  private head = 0;
-  private count = 0;
+  private readonly db: BunDatabase;
+  private readonly insertEntry: Statement<unknown, InsertRequestLogParams>;
+  private readonly findGroupKey: Statement<StoredGroupKeyRow, [string]>;
   private activeRequests = 0;
   private readonly activeEntries = new Map<string, RequestLogEntry>();
 
-  constructor(maxEntries = 1000, filePath?: string) {
-    this.maxEntries = maxEntries;
-    this.filePath = filePath;
-    this.entries = new Array<RequestLogEntry>(maxEntries);
-    if (filePath !== undefined) this.loadFromDisk();
+  constructor(dbPath = ":memory:") {
+    this.db = new BunDatabase(dbPath);
+    this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA synchronous = NORMAL");
+    this.db.run("PRAGMA busy_timeout = 5000");
+    this.db.run(`CREATE TABLE IF NOT EXISTS request_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL UNIQUE,
+      group_id TEXT NOT NULL,
+      group_scope TEXT NOT NULL CHECK (group_scope IN ('message', 'trigger')),
+      source_message_id TEXT,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      author_username TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      estimated_cost_usd REAL,
+      summary_json TEXT NOT NULL,
+      entry_json TEXT NOT NULL
+    )`);
+    this.db.run("CREATE INDEX IF NOT EXISTS request_logs_timestamp ON request_logs(timestamp DESC, id DESC)");
+    this.db.run("CREATE INDEX IF NOT EXISTS request_logs_group ON request_logs(group_id, timestamp, id)");
+    this.db.run("CREATE INDEX IF NOT EXISTS request_logs_guild_timestamp ON request_logs(guild_id, timestamp DESC)");
+    this.db.run("CREATE INDEX IF NOT EXISTS request_logs_channel_timestamp ON request_logs(channel_id, timestamp DESC)");
+    this.db.run("CREATE INDEX IF NOT EXISTS request_logs_author_timestamp ON request_logs(author_username, timestamp DESC)");
+    this.db.run(`CREATE INDEX IF NOT EXISTS request_logs_filters_timestamp
+      ON request_logs(guild_id, channel_id, author_username, timestamp DESC)`);
+    this.insertEntry = this.db.prepare<unknown, InsertRequestLogParams>(`INSERT INTO request_logs
+      (request_id, group_id, group_scope, source_message_id, guild_id, channel_id,
+       author_username, timestamp, estimated_cost_usd, summary_json, entry_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(request_id) DO UPDATE SET
+        group_id = excluded.group_id,
+        group_scope = excluded.group_scope,
+        source_message_id = excluded.source_message_id,
+        guild_id = excluded.guild_id,
+        channel_id = excluded.channel_id,
+        author_username = excluded.author_username,
+        timestamp = excluded.timestamp,
+        estimated_cost_usd = excluded.estimated_cost_usd,
+        summary_json = excluded.summary_json,
+        entry_json = excluded.entry_json`);
+    this.findGroupKey = this.db.prepare<StoredGroupKeyRow, [string]>(`SELECT group_id, group_scope, source_message_id
+      FROM request_logs WHERE request_id = ?`);
   }
 
   push(entry: RequestLogEntry): void {
+    const key = this.requestGroupKey(entry);
+    const summary = toSummary(entry);
+    const storedEntry = sanitizeDashboardLogEntry(entry);
+    this.insertEntry.run(
+      entry.requestId,
+      key.groupId,
+      key.scope,
+      key.sourceMessageId ?? null,
+      entry.guildId,
+      entry.channelId,
+      entry.authorUsername,
+      entry.timestamp,
+      summary.estimatedCostUsd,
+      JSON.stringify(summary),
+      JSON.stringify(storedEntry),
+    );
     this.activeEntries.delete(entry.requestId);
-    this.entries[this.head] = entry;
-    this.head = (this.head + 1) % this.maxEntries;
-    if (this.count < this.maxEntries) this.count++;
-    if (this.filePath !== undefined) this.saveToDisk();
-  }
-
-  private loadFromDisk(): void {
-    if (this.filePath === undefined || !existsSync(this.filePath)) return;
-    try {
-      const text = readFileSync(this.filePath, "utf-8");
-      const loaded = JSON.parse(text) as RequestLogEntry[];
-      if (!Array.isArray(loaded)) return;
-      // Load entries chronologically (oldest first), respecting maxEntries
-      const toLoad = loaded.slice(-this.maxEntries);
-      for (const entry of toLoad) {
-        this.entries[this.head] = entry;
-        this.head = (this.head + 1) % this.maxEntries;
-        if (this.count < this.maxEntries) this.count++;
-      }
-    } catch {
-      // File corrupt or unreadable — start fresh
-    }
-  }
-
-  private saveToDisk(): void {
-    if (this.filePath === undefined) return;
-    // Extract entries in chronological order (oldest first)
-    const chronological: RequestLogEntry[] = [];
-    for (let i = 0; i < this.count; i++) {
-      const idx = (this.head - this.count + i + this.maxEntries) % this.maxEntries;
-      chronological.push(this.entries[idx] as RequestLogEntry);
-    }
-    const tempPath = `${this.filePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(chronological, null, 2));
-    renameSync(tempPath, this.filePath);
   }
 
   query(filters: RequestLogFilters = {}, limit?: number): RequestLogEntry[] {
-    const result: RequestLogEntry[] = [];
-    if (limit !== undefined && limit <= 0) return result;
-    for (const entry of [...this.activeEntries.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp))) {
-      if (!entryMatchesFilters(entry, filters)) continue;
-      result.push(withLiveActiveDurations(entry));
-      if (limit !== undefined && result.length >= limit) return result;
-    }
-    const completed: Array<{ entry: RequestLogEntry; order: number }> = [];
-    for (let i = 0; i < this.count; i++) {
-      const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
-      const entry = this.entries[idx] as RequestLogEntry;
-      if (!entryMatchesFilters(entry, filters)) continue;
-      completed.push({ entry, order: this.count - i });
-    }
-    completed.sort((a, b) => {
-      const byTime = b.entry.timestamp.localeCompare(a.entry.timestamp);
-      return byTime !== 0 ? byTime : b.order - a.order;
-    });
-    for (const item of completed) {
-      result.push(item.entry);
-      if (limit !== undefined && result.length >= limit) break;
-    }
-    return result;
+    if (limit !== undefined && limit <= 0) return [];
+    const active = this.matchingActiveEntries(filters);
+    const remaining = limit === undefined ? undefined : Math.max(0, limit - active.length);
+    if (remaining === 0) return active.slice(0, limit);
+    const filter = requestLogFilterQuery(filters);
+    const limitSql = remaining === undefined ? "" : " LIMIT ?";
+    const params: Array<string | number> = [...filter.params];
+    if (remaining !== undefined) params.push(remaining);
+    const rows = this.db.prepare(`SELECT entry_json FROM request_logs${filter.where}
+      ORDER BY timestamp DESC, id DESC${limitSql}`).all(...params) as Array<{ entry_json: string }>;
+    return [...active, ...rows.map((row) => JSON.parse(row.entry_json) as RequestLogEntry)];
   }
 
   /** Returns compact rows for the dashboard list without large tool or LLM payloads. */
   querySummaries(filters: RequestLogFilters = {}, limit?: number): RequestLogSummary[] {
-    return this.query(filters, limit).map((entry) => toSummary(entry));
+    if (limit !== undefined && limit <= 0) return [];
+    const active = this.matchingActiveEntries(filters).map((entry) => toSummary(entry));
+    const remaining = limit === undefined ? undefined : Math.max(0, limit - active.length);
+    if (remaining === 0) return active.slice(0, limit);
+    const filter = requestLogFilterQuery(filters);
+    const limitSql = remaining === undefined ? "" : " LIMIT ?";
+    const params: Array<string | number> = [...filter.params];
+    if (remaining !== undefined) params.push(remaining);
+    const rows = this.db.prepare(`SELECT summary_json FROM request_logs${filter.where}
+      ORDER BY timestamp DESC, id DESC${limitSql}`).all(...params) as Array<{ summary_json: string }>;
+    return [...active, ...rows.map((row) => JSON.parse(row.summary_json) as RequestLogSummary)];
   }
 
   /** Groups all request phases rooted in the same Discord message or synthetic trigger. */
   queryGroups(filters: RequestLogFilters = {}, limit?: number): RequestLogGroupSummary[] {
-    const groups = groupRequestLogs(this.query(filters));
-    return limit === undefined ? groups : groups.slice(0, Math.max(0, limit));
+    if (limit !== undefined && limit <= 0) return [];
+    const filter = requestLogFilterQuery(filters);
+    const limitSql = limit === undefined ? "" : " LIMIT ?";
+    const params: Array<string | number> = [...filter.params];
+    if (limit !== undefined) params.push(limit);
+    const groupRows = this.db.prepare(`SELECT group_id FROM request_logs${filter.where}
+      GROUP BY group_id ORDER BY MIN(timestamp) DESC${limitSql}`).all(...params) as Array<{ group_id: string }>;
+    const active = this.matchingActiveSummaries(filters);
+    const groupIds = new Set([...groupRows.map((row) => row.group_id), ...active.map((item) => item.key.groupId)]);
+    const stored = groupIds.size === 0 ? [] : this.storedSummaries([...groupIds], filter);
+    const groups = groupRequestSummaries([...stored, ...active]);
+    return limit === undefined ? groups : groups.slice(0, limit);
+  }
+
+  /** Returns the recent lifecycle page and totals across every matching request. */
+  queryGroupPage(filters: RequestLogFilters = {}, limit?: number): RequestLogGroupPage {
+    return {
+      groups: this.queryGroups(filters, limit),
+      totals: this.queryTotals(filters),
+    };
   }
 
   /** Returns every full request phase belonging to one dashboard group. */
   getSanitizedGroup(groupId: string): RequestLogGroupDetail | null {
-    const group = groupRequestLogs(this.query()).find((candidate) => candidate.groupId === groupId);
+    const rows = this.db.prepare(`SELECT group_id, group_scope, source_message_id, summary_json, entry_json
+      FROM request_logs WHERE group_id = ? ORDER BY timestamp, id`).all(groupId) as StoredDetailRow[];
+    const active = [...this.activeEntries.values()]
+      .filter((entry) => this.requestGroupKey(entry).groupId === groupId)
+      .map((entry): StoredRequestDetail => ({
+        key: this.requestGroupKey(entry),
+        summary: toSummary(withLiveActiveDurations(entry)),
+        entry: sanitizeDashboardLogEntry(withLiveActiveDurations(entry)),
+      }));
+    const stored = rows.map((row) => storedRequestDetail(row));
+    const items = [...stored, ...active].sort((a, b) => a.summary.timestamp.localeCompare(b.summary.timestamp));
+    const group = groupRequestSummaries(items)[0];
     if (group === undefined) return null;
-    const entries = group.requests.flatMap((summary) => {
-      const entry = this.getSanitizedByRequestId(summary.requestId);
-      return entry === null ? [] : [{ summary, entry }];
-    });
-    return { ...group, entries };
+    return {
+      ...group,
+      entries: items.map((item) => ({ summary: item.summary, entry: item.entry })),
+    };
   }
 
   /** Finds one full dashboard log entry by request ID for on-demand expansion. */
   getByRequestId(requestId: string): RequestLogEntry | null {
     const active = this.activeEntries.get(requestId);
     if (active !== undefined) return withLiveActiveDurations(active);
-    for (let i = 0; i < this.count; i++) {
-      const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
-      const entry = this.entries[idx] as RequestLogEntry;
-      if (entry.requestId === requestId) return entry;
-    }
-    return null;
+    const row = this.db.prepare("SELECT entry_json FROM request_logs WHERE request_id = ?")
+      .get(requestId) as { entry_json: string } | null;
+    return row === null ? null : JSON.parse(row.entry_json) as RequestLogEntry;
   }
 
   /** Finds one entry for dashboard detail responses with oversized base64 image data replaced. */
@@ -213,13 +320,12 @@ export class RequestLogStore {
       channelIds.add(entry.channelId);
       usernames.add(entry.authorUsername);
     }
-    for (let i = 0; i < this.count; i++) {
-      const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
-      const entry = this.entries[idx] as RequestLogEntry;
-      guildIds.add(entry.guildId);
-      channelIds.add(entry.channelId);
-      usernames.add(entry.authorUsername);
-    }
+    const storedGuildIds = this.db.prepare("SELECT DISTINCT guild_id FROM request_logs").all() as Array<{ guild_id: string }>;
+    const storedChannelIds = this.db.prepare("SELECT DISTINCT channel_id FROM request_logs").all() as Array<{ channel_id: string }>;
+    const storedUsernames = this.db.prepare("SELECT DISTINCT author_username FROM request_logs").all() as Array<{ author_username: string }>;
+    for (const row of storedGuildIds) guildIds.add(row.guild_id);
+    for (const row of storedChannelIds) channelIds.add(row.channel_id);
+    for (const row of storedUsernames) usernames.add(row.author_username);
     return {
       guildIds: [...guildIds],
       channelIds: [...channelIds],
@@ -246,6 +352,138 @@ export class RequestLogStore {
   removeActive(requestId: string): void {
     this.activeEntries.delete(requestId);
   }
+
+  close(): void {
+    this.db.close();
+  }
+
+  private matchingActiveEntries(filters: RequestLogFilters): RequestLogEntry[] {
+    return [...this.activeEntries.values()]
+      .filter((entry) => entryMatchesFilters(entry, filters))
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .map((entry) => withLiveActiveDurations(entry));
+  }
+
+  private matchingActiveSummaries(filters: RequestLogFilters): StoredRequestSummary[] {
+    return this.matchingActiveEntries(filters).map((entry) => ({
+      key: this.requestGroupKey(entry),
+      summary: toSummary(entry),
+    }));
+  }
+
+  private storedSummaries(groupIds: string[], filter: LogFilterQuery): StoredRequestSummary[] {
+    const placeholders = groupIds.map(() => "?").join(", ");
+    const rows = this.db.prepare(`SELECT group_id, group_scope, source_message_id, summary_json
+      FROM request_logs WHERE group_id IN (${placeholders})${filter.and}
+      ORDER BY timestamp, id`).all(...groupIds, ...filter.params) as StoredLogRow[];
+    return rows.map((row) => storedRequestSummary(row));
+  }
+
+  private queryTotals(filters: RequestLogFilters): RequestLogTotals {
+    const filter = requestLogFilterQuery(filters);
+    const row = this.db.prepare(`SELECT COUNT(*) AS request_count,
+        COUNT(DISTINCT group_id) AS group_count,
+        COUNT(estimated_cost_usd) AS cost_count,
+        SUM(estimated_cost_usd) AS estimated_cost_usd,
+        MIN(timestamp) AS first_recorded_at
+      FROM request_logs${filter.where}`).get(...filter.params) as {
+        request_count: number;
+        group_count: number;
+        cost_count: number;
+        estimated_cost_usd: number | null;
+        first_recorded_at: string | null;
+      };
+    const active = this.matchingActiveSummaries(filters);
+    const activeGroupIds = [...new Set(active.map((item) => item.key.groupId))];
+    let groupCount = row.group_count;
+    if (activeGroupIds.length > 0) {
+      const placeholders = activeGroupIds.map(() => "?").join(", ");
+      const existing = this.db.prepare(`SELECT DISTINCT group_id FROM request_logs
+        WHERE group_id IN (${placeholders})${filter.and}`)
+        .all(...activeGroupIds, ...filter.params) as Array<{ group_id: string }>;
+      const existingIds = new Set(existing.map((item) => item.group_id));
+      groupCount += activeGroupIds.filter((groupId) => !existingIds.has(groupId)).length;
+    }
+    const activeCosts = active.flatMap((item) => item.summary.estimatedCostUsd === null
+      ? []
+      : [item.summary.estimatedCostUsd]);
+    const firstRecordedAt = active.reduce<string | null>((first, item) => (
+      first === null || item.summary.timestamp < first ? item.summary.timestamp : first
+    ), row.first_recorded_at);
+    return {
+      requestCount: row.request_count + active.length,
+      groupCount,
+      estimatedCostUsd: row.cost_count + activeCosts.length === 0
+        ? null
+        : (row.estimated_cost_usd ?? 0) + activeCosts.reduce((total, cost) => total + cost, 0),
+      firstRecordedAt,
+    };
+  }
+
+  private requestGroupKey(
+    entry: RequestLogEntry,
+    visitedRequestIds: ReadonlySet<string> = new Set(),
+  ): RequestLogGroupKey {
+    const trigger = isRecord(entry.trigger) ? entry.trigger : undefined;
+    if (typeof trigger?.jobId === "string" && trigger.jobId !== "") {
+      return { groupId: `job:${trigger.jobId}`, scope: "trigger" };
+    }
+    const sourceRequestId = typeof trigger?.sourceRequestId === "string" ? trigger.sourceRequestId : undefined;
+    if (sourceRequestId !== undefined && !visitedRequestIds.has(sourceRequestId)) {
+      const sourceActive = this.activeEntries.get(sourceRequestId);
+      if (sourceActive !== undefined) {
+        return this.requestGroupKey(sourceActive, new Set([...visitedRequestIds, entry.requestId]));
+      }
+      const source = this.findGroupKey.get(sourceRequestId);
+      if (source !== null) return storedGroupKey(source);
+    }
+    return directRequestLogGroupKey(entry);
+  }
+}
+
+function requestLogFilterQuery(filters: RequestLogFilters): LogFilterQuery {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (filters.guildId !== undefined) {
+    conditions.push("guild_id = ?");
+    params.push(filters.guildId);
+  }
+  if (filters.channelId !== undefined) {
+    conditions.push("channel_id = ?");
+    params.push(filters.channelId);
+  }
+  if (filters.authorUsername !== undefined) {
+    conditions.push("author_username = ?");
+    params.push(filters.authorUsername);
+  }
+  const expression = conditions.join(" AND ");
+  return {
+    where: expression === "" ? "" : ` WHERE ${expression}`,
+    and: expression === "" ? "" : ` AND ${expression}`,
+    params,
+  };
+}
+
+function storedGroupKey(row: Pick<StoredLogRow, "group_id" | "group_scope" | "source_message_id">): RequestLogGroupKey {
+  return {
+    groupId: row.group_id,
+    scope: row.group_scope,
+    ...(row.source_message_id !== null ? { sourceMessageId: row.source_message_id } : {}),
+  };
+}
+
+function storedRequestSummary(row: StoredLogRow): StoredRequestSummary {
+  return {
+    key: storedGroupKey(row),
+    summary: JSON.parse(row.summary_json) as RequestLogSummary,
+  };
+}
+
+function storedRequestDetail(row: StoredDetailRow): StoredRequestDetail {
+  return {
+    ...storedRequestSummary(row),
+    entry: JSON.parse(row.entry_json) as RequestLogEntry,
+  };
 }
 
 function entryMatchesFilters(entry: RequestLogEntry, filters: RequestLogFilters): boolean {
@@ -333,6 +571,7 @@ function sanitizeDashboardValue(value: unknown, key = ""): unknown {
 function sanitizeDashboardString(value: string, key: string): string {
   const dataUri = dataUriBase64PayloadOffset(value);
   if (dataUri !== null) {
+    if (/^\[\d+KB base64 truncated\]$/.test(value.slice(dataUri))) return value;
     return `${value.slice(0, dataUri)}[${formatApproxKb(value.length - dataUri)} base64 truncated]`;
   }
 
@@ -390,22 +629,21 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
   return summary;
 }
 
-function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] {
-  const grouped = new Map<string, RequestLogEntry[]>();
-  const entriesByRequestId = new Map(entries.map((entry) => [entry.requestId, entry]));
-  for (const entry of entries) {
-    const key = requestLogGroupKey(entry, entriesByRequestId);
-    const current = grouped.get(key.groupId) ?? [];
-    current.push(entry);
-    grouped.set(key.groupId, current);
+function groupRequestSummaries(items: StoredRequestSummary[]): RequestLogGroupSummary[] {
+  const grouped = new Map<string, StoredRequestSummary[]>();
+  for (const item of items) {
+    const current = grouped.get(item.key.groupId) ?? [];
+    current.push(item);
+    grouped.set(item.key.groupId, current);
   }
 
-  return [...grouped.entries()].map(([groupId, groupEntries]) => {
-    const orderedEntries = [...groupEntries].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const requests = orderedEntries.map((entry) => toSummary(entry));
-    const primary = orderedEntries.find((entry) => entry.triggerContext?.content?.trim() !== "") ?? orderedEntries[0];
+  return [...grouped.entries()].map(([groupId, groupItems]) => {
+    const orderedItems = [...groupItems].sort((a, b) => a.summary.timestamp.localeCompare(b.summary.timestamp));
+    const requests = orderedItems.map((item) => item.summary);
+    const primary = requests.find((summary) => summary.triggerContext?.content?.trim() !== "") ?? requests[0];
     if (primary === undefined) throw new Error(`Dashboard group ${groupId} has no entries.`);
-    const key = requestLogGroupKey(primary, entriesByRequestId);
+    const key = orderedItems[0]?.key;
+    if (key === undefined) throw new Error(`Dashboard group ${groupId} has no key.`);
     const estimatedCost = requests.reduce((total, request) => total + (request.estimatedCostUsd ?? 0), 0);
     return {
       groupId,
@@ -428,30 +666,10 @@ function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] 
   }).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
-function requestLogGroupKey(
-  entry: RequestLogEntry,
-  entriesByRequestId: ReadonlyMap<string, RequestLogEntry>,
-  visitedRequestIds: ReadonlySet<string> = new Set(),
-): {
-  groupId: string;
-  scope: "message" | "trigger";
-  sourceMessageId?: string;
-} {
+function directRequestLogGroupKey(entry: RequestLogEntry): RequestLogGroupKey {
   const trigger = isRecord(entry.trigger) ? entry.trigger : undefined;
   if (typeof trigger?.jobId === "string" && trigger.jobId !== "") {
-    const jobId = trigger.jobId;
-    return { groupId: `job:${jobId}`, scope: "trigger" };
-  }
-  const sourceRequestId = typeof trigger?.sourceRequestId === "string" ? trigger.sourceRequestId : undefined;
-  if (sourceRequestId !== undefined && !visitedRequestIds.has(sourceRequestId)) {
-    const sourceEntry = entriesByRequestId.get(sourceRequestId);
-    if (sourceEntry !== undefined) {
-      return requestLogGroupKey(
-        sourceEntry,
-        entriesByRequestId,
-        new Set([...visitedRequestIds, entry.requestId]),
-      );
-    }
+    return { groupId: `job:${trigger.jobId}`, scope: "trigger" };
   }
   const triggerSourceMessageId = typeof trigger?.sourceMessageId === "string" ? trigger.sourceMessageId : undefined;
   const sourceMessageId = entry.triggerContext?.messageId
@@ -504,5 +722,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const logDir = process.env.LOG_DIR;
-const logFile = logDir !== undefined && logDir !== "" ? `${logDir}/request-log.json` : undefined;
-export const requestLogStore = new RequestLogStore(1000, logFile);
+if (logDir !== undefined && logDir !== "") mkdirSync(logDir, { recursive: true });
+const logDatabasePath = logDir === undefined || logDir === "" ? ":memory:" : join(logDir, "request-logs.db");
+export const requestLogStore = new RequestLogStore(logDatabasePath);

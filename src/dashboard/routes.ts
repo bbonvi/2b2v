@@ -338,7 +338,7 @@ export function createDashboardRoutes(input: {
       "/api/log-groups": (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
-        return json(requestLogStore.queryGroups(requestLogFilters(req), DASHBOARD_LOG_ENTRY_LIMIT));
+        return json(requestLogStore.queryGroupPage(requestLogFilters(req), DASHBOARD_LOG_ENTRY_LIMIT));
       },
 
       "/api/log-groups/:groupId": (req) => {

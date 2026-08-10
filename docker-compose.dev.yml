@@ -7,7 +7,7 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /app/data
-      LOG_DIR: /tmp
+      LOG_DIR: /app/logs
       LOG_LEVEL: debug
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
       WORKSPACE_SOCKET_PATH: /run/2b2v/workspace.sock
@@ -20,6 +20,7 @@ services:
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
       - dev-data:/app/data
+      - dev-request-logs:/app/logs
       - workspace-control:/run/2b2v
       - workspace-staging:/app/workspace-staging
     ports:
@@ -43,6 +44,7 @@ services:
 
 volumes:
   dev-data:
+  dev-request-logs:
   workspace-data:
   workspace-control:
   workspace-staging:

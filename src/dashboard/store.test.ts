@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { RequestLogStore, type RequestLogEntry } from "./store";
 
 function makeEntry(overrides: Partial<RequestLogEntry> = {}): RequestLogEntry {
@@ -37,15 +37,15 @@ describe("RequestLogStore", () => {
     expect(result[1]?.requestId).toBe("r1");
   });
 
-  test("ring buffer evicts oldest entries at capacity", () => {
-    const store = new RequestLogStore(3);
-    store.push(makeEntry({ requestId: "r1" }));
-    store.push(makeEntry({ requestId: "r2" }));
-    store.push(makeEntry({ requestId: "r3" }));
-    store.push(makeEntry({ requestId: "r4" }));
+  test("keeps several thousand entries without eviction", () => {
+    const store = new RequestLogStore();
+    for (let index = 0; index < 2_500; index++) {
+      store.push(makeEntry({ requestId: `r${index}`, timestamp: new Date(index).toISOString() }));
+    }
     const result = store.query();
-    expect(result).toHaveLength(3);
-    expect(result.map((e) => e.requestId)).toEqual(["r4", "r3", "r2"]);
+    expect(result).toHaveLength(2_500);
+    expect(result[0]?.requestId).toBe("r2499");
+    expect(result.at(-1)?.requestId).toBe("r0");
   });
 
   test("query filters by guildId", () => {
@@ -90,6 +90,34 @@ describe("RequestLogStore", () => {
 
     expect(store.query({ guildId: "g1" }, 2).map((entry) => entry.requestId)).toEqual(["r4", "r3"]);
     expect(store.query({}, 0)).toEqual([]);
+  });
+
+  test("totals include every filtered request before lifecycle pagination", () => {
+    const store = new RequestLogStore();
+    for (let index = 0; index < 240; index++) {
+      store.push(makeEntry({
+        requestId: `r${index}`,
+        guildId: index % 2 === 0 ? "g1" : "g2",
+        triggerContext: { messageId: `m${index}`, content: "message" },
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+        llmCalls: [{
+          model: "model",
+          promptTokens: 1,
+          completionTokens: 1,
+          totalTokens: 2,
+          estimatedCostUsd: 0.01,
+          stopReason: "stop",
+          contentTypes: ["text"],
+        }],
+      }));
+    }
+
+    const page = store.queryGroupPage({ guildId: "g1" }, 100);
+    expect(page.groups).toHaveLength(100);
+    expect(page.totals.requestCount).toBe(120);
+    expect(page.totals.groupCount).toBe(120);
+    expect(page.totals.estimatedCostUsd).toBeCloseTo(1.2);
+    expect(page.totals.firstRecordedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
   test("query sorts by request timestamp, not emit order", () => {
@@ -157,7 +185,7 @@ describe("RequestLogStore", () => {
     expect(store.getByRequestId("missing")).toBeNull();
   });
 
-  test("getSanitizedByRequestId trims base64 image data without mutating stored entry", () => {
+  test("trims base64 image data before it reaches persistent storage", () => {
     const store = new RequestLogStore();
     const dataUri = `data:image/png;base64,${"A".repeat(5_000)}`;
     const rawBase64 = "B".repeat(5_000);
@@ -185,8 +213,8 @@ describe("RequestLogStore", () => {
 
     const sanitized = store.getSanitizedByRequestId("r1");
     if (sanitized === null) throw new Error("expected sanitized entry");
-    const raw = store.getByRequestId("r1");
-    if (raw === null) throw new Error("expected raw entry");
+    const stored = store.getByRequestId("r1");
+    if (stored === null) throw new Error("expected stored entry");
 
     const sanitizedText = JSON.stringify(sanitized);
     expect(sanitizedText).toContain("data:image/png;base64,[5KB base64 truncated]");
@@ -194,9 +222,7 @@ describe("RequestLogStore", () => {
     expect(sanitizedText).not.toContain("A".repeat(1_024));
     expect(sanitizedText).not.toContain("B".repeat(1_024));
 
-    const rawText = JSON.stringify(raw);
-    expect(rawText).toContain(dataUri);
-    expect(rawText).toContain(rawBase64);
+    expect(JSON.stringify(stored)).toBe(sanitizedText);
   });
 
   test("getFilterOptions returns unique values", () => {
@@ -485,97 +511,55 @@ describe("RequestLogStore", () => {
 });
 
 describe("RequestLogStore persistence", () => {
-  const testFile = "/tmp/request-log-store-test.json";
+  const testFile = "/tmp/request-log-store-test.db";
+  const stores: RequestLogStore[] = [];
+
+  function openStore(): RequestLogStore {
+    const store = new RequestLogStore(testFile);
+    stores.push(store);
+    return store;
+  }
 
   afterEach(() => {
-    if (existsSync(testFile)) unlinkSync(testFile);
-    if (existsSync(`${testFile}.tmp`)) unlinkSync(`${testFile}.tmp`);
+    for (const store of stores.splice(0)) store.close();
+    for (const path of [testFile, `${testFile}-wal`, `${testFile}-shm`]) {
+      if (existsSync(path)) unlinkSync(path);
+    }
   });
 
-  test("saves entries to disk on push", () => {
-    const store = new RequestLogStore(1000, testFile);
+  test("saves entries to SQLite on push", () => {
+    const store = openStore();
     store.push(makeEntry({ requestId: "r1" }));
     store.push(makeEntry({ requestId: "r2" }));
 
     expect(existsSync(testFile)).toBe(true);
-    const saved = JSON.parse(readFileSync(testFile, "utf-8")) as RequestLogEntry[];
-    expect(saved).toHaveLength(2);
-    expect(saved[0]?.requestId).toBe("r1");
-    expect(saved[1]?.requestId).toBe("r2");
+    expect(openStore().query().map((entry) => entry.requestId)).toEqual(["r2", "r1"]);
   });
 
-  test("loads entries from existing file on construction", () => {
-    const preload: RequestLogEntry[] = [
-      makeEntry({ requestId: "pre1" }),
-      makeEntry({ requestId: "pre2" }),
-    ];
-    writeFileSync(testFile, JSON.stringify(preload));
-
-    const store = new RequestLogStore(1000, testFile);
-    const result = store.query();
-    expect(result).toHaveLength(2);
-    expect(result[0]?.requestId).toBe("pre2"); // newest first
-    expect(result[1]?.requestId).toBe("pre1");
+  test("uses process-local SQLite when no path is provided", () => {
+    const first = new RequestLogStore();
+    const second = new RequestLogStore();
+    first.push(makeEntry({ requestId: "r1" }));
+    expect(first.query()).toHaveLength(1);
+    expect(second.query()).toEqual([]);
+    first.close();
+    second.close();
   });
 
-  test("respects maxEntries when loading from file", () => {
-    const preload: RequestLogEntry[] = [
-      makeEntry({ requestId: "old1" }),
-      makeEntry({ requestId: "old2" }),
-      makeEntry({ requestId: "old3" }),
-      makeEntry({ requestId: "old4" }),
-    ];
-    writeFileSync(testFile, JSON.stringify(preload));
-
-    const store = new RequestLogStore(2, testFile);
-    const result = store.query();
-    expect(result).toHaveLength(2);
-    // Should have kept the last 2 (newest)
-    expect(result.map((e) => e.requestId)).toEqual(["old4", "old3"]);
-  });
-
-  test("handles missing file gracefully", () => {
-    const store = new RequestLogStore(1000, testFile);
-    expect(store.query()).toEqual([]);
-  });
-
-  test("handles corrupt file gracefully", () => {
-    writeFileSync(testFile, "not valid json {{{");
-    const store = new RequestLogStore(1000, testFile);
-    expect(store.query()).toEqual([]);
-  });
-
-  test("handles non-array JSON gracefully", () => {
-    writeFileSync(testFile, JSON.stringify({ foo: "bar" }));
-    const store = new RequestLogStore(1000, testFile);
-    expect(store.query()).toEqual([]);
-  });
-
-  test("no file operations when filePath undefined", () => {
-    const store = new RequestLogStore(1000);
-    store.push(makeEntry({ requestId: "r1" }));
-    // No file should be created at testFile
-    expect(existsSync(testFile)).toBe(false);
-  });
-
-  test("persists across simulated restarts", () => {
-    // First "session"
-    const store1 = new RequestLogStore(1000, testFile);
+  test("persists across store instances", () => {
+    const store1 = openStore();
     store1.push(makeEntry({ requestId: "s1-r1" }));
     store1.push(makeEntry({ requestId: "s1-r2" }));
 
-    // Second "session" (simulates hot reload)
-    const store2 = new RequestLogStore(1000, testFile);
+    const store2 = openStore();
     const loaded = store2.query();
     expect(loaded).toHaveLength(2);
     expect(loaded.map((e) => e.requestId)).toEqual(["s1-r2", "s1-r1"]);
 
-    // Add more entries in second session
     store2.push(makeEntry({ requestId: "s2-r1" }));
     expect(store2.query()).toHaveLength(3);
 
-    // Third "session" sees all
-    const store3 = new RequestLogStore(1000, testFile);
+    const store3 = openStore();
     expect(store3.query()).toHaveLength(3);
   });
 });
