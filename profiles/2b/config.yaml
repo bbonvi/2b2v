@@ -232,9 +232,9 @@ personaModes:
               status: dnd
 
 contextHistory:
-    retainedMessages: 600 # Total messages kept immediately after each rollover
-    recentMessages: 100 # Minimum recent tail and rollover batch size
-    messageCharLimit: 300 # Max chars for bounded older and auxiliary history rows
+    retainedMessages: 500 # Total messages kept immediately after each rollover
+    recentMessages: 80 # Minimum recent tail and rollover batch size
+    messageCharLimit: 100 # Max chars for bounded older and auxiliary history rows
 
 # Background memory extraction
 memoryExtraction:
