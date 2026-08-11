@@ -54,7 +54,6 @@ export interface TimeoutUserToolDeps {
   guildId?: string;
   botUserId: string;
   guildOwnerId?: string;
-  isRequesterAdmin: () => Promise<boolean>;
   resolveMember: (target: string) => Promise<TimeoutMemberResolution>;
 }
 

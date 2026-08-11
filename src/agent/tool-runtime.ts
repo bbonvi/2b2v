@@ -331,20 +331,6 @@ function buildAgentTools(
     guildId,
     botUserId: client.user?.id ?? "",
     guildOwnerId: guild.ownerId,
-    isRequesterAdmin: async () => {
-      const requesterId = effectiveCurrentRequest?.requesterId;
-      if (requesterId === undefined || requesterId === "scheduler") return false;
-      if (guildConfig.adminUserIds.includes(requesterId)) return true;
-      let requester = guild.members.cache.get(requesterId);
-      if (requester === undefined) {
-        try {
-          requester = await guild.members.fetch(requesterId);
-        } catch {
-          return false;
-        }
-      }
-      return requester.permissions.has(PermissionFlagsBits.Administrator);
-    },
     resolveMember: async (target) => {
       const raw = target.trim();
       const mentionMatch = raw.match(/^<@!?(\d+)>$/);
