@@ -3051,12 +3051,12 @@
     const data = body.groups || [];
     const totals = body.totals || {};
 
-    const costs = '24h $' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(4)
-      + ' · 7d $' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(4)
-      + ' · 31d $' + Number(totals.estimatedCostLast31DaysUsd || 0).toFixed(4);
+    const costs = '<span class="entry-cost">24h $' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(2) + '</span>'
+      + ' · <span class="entry-cost">7d $' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(2) + '</span>'
+      + ' · <span class="entry-cost">31d $' + Number(totals.estimatedCostLast31DaysUsd || 0).toFixed(2) + '</span>';
     const since = totals.firstRecordedAt == null ? '' : ' · since ' + fmtLogStart(totals.firstRecordedAt);
-    logCount.textContent = costs + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
-      + (totals.groupCount || 0) + ' message lifecycles' + since;
+    logCount.innerHTML = costs + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
+      + (totals.groupCount || 0) + ' message lifecycles' + esc(since);
     if (data.length === 0) {
       rowNodes.clear();
       detailRenderedHtml.clear();
