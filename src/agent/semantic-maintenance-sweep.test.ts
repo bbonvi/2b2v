@@ -61,6 +61,13 @@ function freshContext() {
       { label: "Inner Threads", text: "fresh automatic thread", cached: false, role: "developer" as const },
       { label: "Chat History — Older", text: "fresh older history", cached: true, role: "system" as const },
       { label: "Chat History — Newer", text: "fresh standard history", cached: false, role: "developer" as const },
+      { label: "Server Members", text: "members", cached: false, role: "developer" as const },
+      { label: "Available Emojis", text: "emojis", cached: true, role: "system" as const },
+      { label: "Upcoming Schedules", text: "schedules", cached: false, role: "developer" as const },
+      { label: "Notebooks", text: "notebooks", cached: false, role: "developer" as const },
+      { label: "Agent Jobs", text: "jobs", cached: false, role: "developer" as const },
+      { label: "Repertoire", text: "repertoire", cached: true, role: "system" as const },
+      { label: "Parent Pre-Context", text: "parent context", cached: true, role: "system" as const },
       { label: "Discord Context", text: "fresh channel metadata", cached: false, role: "developer" as const },
     ],
   };

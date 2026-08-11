@@ -119,6 +119,13 @@ export function createSemanticMaintenanceSweep(input: {
         "Inner Threads",
         "Chat History — Older",
         "Chat History — Newer",
+        "Server Members",
+        "Available Emojis",
+        "Upcoming Schedules",
+        "Notebooks",
+        "Agent Jobs",
+        "Repertoire",
+        "Parent Pre-Context",
       ].includes(section.label)),
     };
     const { maintenanceTranscript: _transcript, promptContext: _promptContext, ...actorRequest } = trigger.memoryRequest;
