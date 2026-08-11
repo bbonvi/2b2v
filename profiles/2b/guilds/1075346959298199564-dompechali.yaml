@@ -2,3 +2,12 @@ ambientInitiative:
     enabled: false
 ambientAttention:
     enabled: false
+
+semanticMaintenance:
+    burst:
+        enabled: true
+        modelProfile: maintenance
+        quietAfter: 3m
+        maxWait: 6m
+        memoryMaxRows: 300
+        memoryMaxChars: 60000
