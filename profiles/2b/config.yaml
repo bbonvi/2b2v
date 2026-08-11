@@ -262,8 +262,8 @@ semanticMaintenance:
     burst:
         enabled: true
         modelProfile: maintenance
-        quietAfter: 2m
-        maxWait: 4m
+        quietAfter: 5m
+        maxWait: 10m
         memoryMaxRows: 300
         memoryMaxChars: 60000
     sweep:
