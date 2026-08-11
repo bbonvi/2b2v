@@ -33,7 +33,7 @@ contextHistory:
 #     enabled: false
 #     everyMessages: 300
 #     maxBatchMessages: 300
-#     minIntervalSeconds: 600
+#     minInterval: 30m
 
 # semanticMaintenance:
 #   burst:

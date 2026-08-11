@@ -454,9 +454,12 @@ describe("guild resolution and persistence", () => {
     }).innerThreads).toEqual({ enabled: true, modelProfile: "main" });
   });
 
-  test("parses and overrides semantic-maintenance durations per guild", () => {
+  test("parses and overrides maintenance durations per guild", () => {
     const global = loadGlobalConfig(BASE_ENV, writeConfig([
       configText,
+      "memoryExtraction:",
+      "  ambient:",
+      "    minInterval: 30m",
       "semanticMaintenance:",
       "  burst:",
       "    modelProfile: fast",
@@ -466,6 +469,7 @@ describe("guild resolution and persistence", () => {
       "    modelProfile: fast",
       "    every: 6h",
     ].join("\n")));
+    expect(global.defaultMemoryExtraction.ambient.minIntervalMs).toBe(1_800_000);
     expect(global.defaultSemanticMaintenance.burst).toMatchObject({
       quietAfterMs: 120_000,
       maxWaitMs: 240_000,
@@ -478,17 +482,21 @@ describe("guild resolution and persistence", () => {
     expect(resolveGuildConfig(global, {
       guildId: "2",
       slug: "",
+      memoryExtraction: { ambient: { minInterval: "45m" } },
       semanticMaintenance: {
         burst: { modelProfile: "main", quietAfter: "10m", maxWait: "12m" },
         sweep: { modelProfile: "main" },
       },
-    }).semanticMaintenance).toMatchObject({
-      burst: {
-      quietAfterMs: 600_000,
-      maxWaitMs: 720_000,
-        modelProfile: "main",
+    })).toMatchObject({
+      memoryExtraction: { ambient: { minIntervalMs: 2_700_000 } },
+      semanticMaintenance: {
+        burst: {
+          quietAfterMs: 600_000,
+          maxWaitMs: 720_000,
+          modelProfile: "main",
+        },
+        sweep: { modelProfile: "main" },
       },
-      sweep: { modelProfile: "main" },
     });
   });
 

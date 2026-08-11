@@ -142,7 +142,7 @@ export function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalC
       modelProfile: "main",
       postReply: true,
       maxToolCalls: 5,
-      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalMs: 600_000 },
     },
     defaultSemanticMaintenance: DEFAULT_SEMANTIC_MAINTENANCE,
     repertoire: {
@@ -223,7 +223,7 @@ export function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConf
       modelProfile: "main",
       postReply: true,
       maxToolCalls: 5,
-      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalMs: 600_000 },
     },
     semanticMaintenance: DEFAULT_SEMANTIC_MAINTENANCE,
     ...overrides,

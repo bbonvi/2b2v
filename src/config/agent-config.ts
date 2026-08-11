@@ -79,7 +79,9 @@ export function resolveGlobalMemoryExtraction(
       enabled: partial?.ambient?.enabled ?? DEFAULT_MEMORY_EXTRACTION.ambient.enabled,
       everyMessages: partial?.ambient?.everyMessages ?? DEFAULT_MEMORY_EXTRACTION.ambient.everyMessages,
       maxBatchMessages: partial?.ambient?.maxBatchMessages ?? DEFAULT_MEMORY_EXTRACTION.ambient.maxBatchMessages,
-      minIntervalSeconds: partial?.ambient?.minIntervalSeconds ?? DEFAULT_MEMORY_EXTRACTION.ambient.minIntervalSeconds,
+      minIntervalMs: partial?.ambient?.minInterval === undefined
+        ? DEFAULT_MEMORY_EXTRACTION.ambient.minIntervalMs
+        : parseDurationMs(partial.ambient.minInterval, "memoryExtraction.ambient.minInterval", { allowZero: true }),
     },
   };
   validateMemoryExtractionConfig(resolved, "memoryExtraction");
@@ -98,7 +100,9 @@ export function resolveGuildMemoryExtraction(
       enabled: partial?.ambient?.enabled ?? global.ambient.enabled,
       everyMessages: partial?.ambient?.everyMessages ?? global.ambient.everyMessages,
       maxBatchMessages: partial?.ambient?.maxBatchMessages ?? global.ambient.maxBatchMessages,
-      minIntervalSeconds: partial?.ambient?.minIntervalSeconds ?? global.ambient.minIntervalSeconds,
+      minIntervalMs: partial?.ambient?.minInterval === undefined
+        ? global.ambient.minIntervalMs
+        : parseDurationMs(partial.ambient.minInterval, "memoryExtraction.ambient.minInterval", { allowZero: true }),
     },
   };
   validateMemoryExtractionConfig(resolved, "memoryExtraction");
@@ -118,8 +122,8 @@ function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefi
   if (!Number.isInteger(config.ambient.maxBatchMessages) || config.ambient.maxBatchMessages < 1) {
     throw new Error(`${keyPrefix}.ambient.maxBatchMessages must be >= 1`);
   }
-  if (!Number.isFinite(config.ambient.minIntervalSeconds) || config.ambient.minIntervalSeconds < 0) {
-    throw new Error(`${keyPrefix}.ambient.minIntervalSeconds must be >= 0`);
+  if (!Number.isFinite(config.ambient.minIntervalMs) || config.ambient.minIntervalMs < 0) {
+    throw new Error(`${keyPrefix}.ambient.minInterval must be >= 0`);
   }
 }
 

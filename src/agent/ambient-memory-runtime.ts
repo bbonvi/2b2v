@@ -9,8 +9,6 @@ import { type IncomingMessage } from "../agent/turn-types";
 import { type AssembledContext } from "../agent/context-assembly";
 import { type HistoryMessage } from "../agent/history-types";
 import { countMessagesSinceMemoryExtraction, getMemoryExtractionCheckpoint, getMessagesSinceMemoryExtraction, markMemoryExtractionCheckpoint, markMemoryExtractionCheckpointAtMessage } from "../db/memory-extraction-repository";
-import { formatMessageLine, OLDER_LEGEND } from "../agent/history-formatting";
-import { insertDateStamps } from "../agent/history-dates";
 import { buildMemoryContext, buildVisibleUserMemoryContext } from "../agent/memory-context";
 import { createRecordMemoryTool } from "../agent/memory-extraction";
 import { applyRuntimeToolPrompts } from "../agent/runtime-tool-prompts";
@@ -19,6 +17,9 @@ import { dashboardTriggerLocation } from "../dashboard/management-runtime";
 import { type PromptBundle } from "../config/instruction-bundle";
 import type { Database } from "../db/database";
 import { type Client, type Guild, type Message } from "discord.js";
+import { getContextHistoryMessages } from "../db/message-history-repository.ts";
+import { processHistory } from "./history-pipeline.ts";
+import { createDiscordReplyFallbackDeps } from "../discord/reply-fallback-runtime.ts";
 
 export function createAmbientMemoryRuntime(input: {
     db: Database;
@@ -46,26 +47,6 @@ function collectHumanUserIds(messages: HistoryMessage[]): string[] {
   return [...recency.keys()].reverse();
 }
 
-function formatAmbientMemoryHistory(messages: HistoryMessage[], timezone: string): string {
-  const dateEntries = insertDateStamps(messages, timezone);
-  const lines: string[] = [OLDER_LEGEND];
-  for (const entry of dateEntries) {
-    if (entry.type === "date") {
-      lines.push(entry.text);
-      continue;
-    }
-    const item = messages[entry.index];
-    if (item === undefined) continue;
-    lines.push(formatMessageLine({
-      message: item,
-      reply: null,
-      includeMessageIds: true,
-      includeDisplayNames: true,
-    }));
-  }
-  return `## Ambient Chat History\n${lines.join("\n")}`;
-}
-
 async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: GuildConfig): Promise<void> {
   if (!guildConfig.memoryExtraction.ambient.enabled) return;
   if (message.guild === null || message.guildId === null) return;
@@ -78,7 +59,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
 
   const checkpoint = getMemoryExtractionCheckpoint(db, guildId, channelId);
   const now = Date.now();
-  const minIntervalMs = guildConfig.memoryExtraction.ambient.minIntervalSeconds * 1000;
+  const minIntervalMs = guildConfig.memoryExtraction.ambient.minIntervalMs;
   if (checkpoint !== null && now - checkpoint.lastRunAt < minIntervalMs) return;
 
   const pendingCount = countMessagesSinceMemoryExtraction(db, {
@@ -129,17 +110,37 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       resolveUserId: (userId) => resolvePromptUsername(guild, userId),
       contextInstruction: getPromptBundle().runtime.contextTemplates.memory,
     });
+    const history = await processHistory(
+      getContextHistoryMessages(db, channelId, guildConfig.contextHistory),
+      null,
+      {
+        contextHistory: guildConfig.contextHistory,
+        mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
+        timezone: guildConfig.timezone,
+        displayNamesByUserId: new Map(
+          [...guild.members.cache.values()].map((member) => [member.id, member.displayName]),
+        ),
+      },
+      createDiscordReplyFallbackDeps({
+        db,
+        clientChannelsFetch: async (id) => await client.channels.fetch(id),
+        guild,
+        guildId,
+        channelId,
+        guildConfig,
+      }),
+    );
     const context: AssembledContext = {
       sections: [
         ...(currentUserMemories !== ""
           ? [{ label: "Memories", role: "developer" as const, cached: false, text: `## Memory\n${currentUserMemories}` }]
           : []),
-        {
-          label: "Chat History — Newer",
-          role: "developer",
-          cached: false,
-          text: formatAmbientMemoryHistory(batch, guildConfig.timezone),
-        },
+        ...(history.olderText === ""
+          ? []
+          : [{ label: "Chat History — Older", role: "system" as const, cached: true, text: history.olderText }]),
+        ...(history.newerText === ""
+          ? []
+          : [{ label: "Chat History — Newer", role: "developer" as const, cached: false, text: history.newerText }]),
       ],
       userMessage: "",
       contextMessageIds: batch.map((item) => item.id),

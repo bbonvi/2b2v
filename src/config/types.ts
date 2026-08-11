@@ -367,10 +367,10 @@ export interface MemoryExtractionConfig {
     enabled: boolean;
     /** Human messages since the last successful memory pass before ambient extraction runs. */
     everyMessages: number;
-    /** Maximum chronological messages reviewed in one ambient pass. */
+    /** Maximum new messages used to select memory subjects for one ambient pass. */
     maxBatchMessages: number;
-    /** Minimum seconds between ambient passes for the same channel. */
-    minIntervalSeconds: number;
+    /** Minimum time between ambient passes for the same channel. */
+    minIntervalMs: number;
   };
 }
 
@@ -765,7 +765,7 @@ export interface GuildConfigYaml {
       enabled?: boolean;
       everyMessages?: number;
       maxBatchMessages?: number;
-      minIntervalSeconds?: number;
+      minInterval?: string;
     };
   };
   memoryContext?: Partial<MemoryContextConfig>;
@@ -853,7 +853,7 @@ export interface MainConfigYaml {
       enabled?: boolean;
       everyMessages?: number;
       maxBatchMessages?: number;
-      minIntervalSeconds?: number;
+      minInterval?: string;
     };
   };
   memoryContext?: Partial<MemoryContextConfig>;

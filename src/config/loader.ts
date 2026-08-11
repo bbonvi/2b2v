@@ -449,7 +449,17 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     notebooks: config.notebooks,
     voice: config.voice,
     replyLoop: config.replyLoop,
-    memoryExtraction: config.memoryExtraction,
+    memoryExtraction: {
+      modelProfile: config.memoryExtraction.modelProfile,
+      postReply: config.memoryExtraction.postReply,
+      maxToolCalls: config.memoryExtraction.maxToolCalls,
+      ambient: {
+        enabled: config.memoryExtraction.ambient.enabled,
+        everyMessages: config.memoryExtraction.ambient.everyMessages,
+        maxBatchMessages: config.memoryExtraction.ambient.maxBatchMessages,
+        minInterval: `${config.memoryExtraction.ambient.minIntervalMs}ms`,
+      },
+    },
     memoryContext: config.memoryContext,
     semanticMaintenance: {
       burst: {

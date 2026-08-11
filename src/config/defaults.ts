@@ -62,7 +62,7 @@ export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     enabled: false,
     everyMessages: 300,
     maxBatchMessages: 300,
-    minIntervalSeconds: 600,
+    minIntervalMs: 10 * 60 * 1000,
   },
 };
 
