@@ -164,7 +164,9 @@ export function createSemanticMaintenanceSweep(input: {
     const relationships = rotate(allProfiles, profile.relationshipOffset, config.relationships.maxProfiles);
     const relationshipContext = bounded(renderRelationshipSweepContext(relationships.items.map((item) => ({
       profile: item,
-      label: input.resolvePromptUsername(trigger.guild, item.userId) ?? item.userId,
+      label: input.resolvePromptUsername(trigger.guild, item.userId) === undefined
+        ? item.userId
+        : `@${input.resolvePromptUsername(trigger.guild, item.userId)} (${item.userId})`,
       events: listRelationshipEvents(input.db, { userId: item.userId, limit: 30 }),
     }))), config.relationships.maxChars);
     const threadCandidates = listInnerThreads(input.db, { status: "all", guildId: trigger.guild.id, limit: 10_000 });

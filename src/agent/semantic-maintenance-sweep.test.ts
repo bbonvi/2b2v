@@ -4,6 +4,8 @@ import type { Client, Guild } from "discord.js";
 import { createDatabase, type Database } from "../db/database.ts";
 import { createMemory } from "../db/memory-repository.ts";
 import { getSemanticMaintenanceSweepState, setSemanticMaintenanceSweepState } from "../db/semantic-maintenance-repository.ts";
+import { saveRelationshipProfile } from "../relationships/repository.ts";
+import { emptyRelationshipProfile } from "../relationships/state.ts";
 import { makeGuildConfig } from "./handler-test-support.ts";
 import { SemanticMaintenanceCoordinator } from "./semantic-maintenance-coordinator.ts";
 import { createSemanticMaintenanceSweep } from "./semantic-maintenance-sweep.ts";
@@ -53,7 +55,12 @@ describe("semantic maintenance sweep", () => {
     createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Portable marker" });
     createMemory(db, { guildId: "g1", kind: "note", content: "Guild one marker" });
     createMemory(db, { guildId: "g2", kind: "note", content: "Guild two marker" });
+    saveRelationshipProfile(db, {
+      ...emptyRelationshipProfile("u1", 1),
+      notes: ["Relationship marker"],
+    });
     const contexts: string[] = [];
+    const relationshipContexts: string[] = [];
     const profiles: string[] = [];
     const sources: Array<string | undefined> = [];
     setSemanticMaintenanceSweepState(db, "profile:2b", { lastAt: 0, memoryId: 0, relationshipOffset: 0, threadOffset: 0 });
@@ -72,7 +79,10 @@ describe("semantic maintenance sweep", () => {
         sources.push(input.source);
         return Promise.resolve();
       },
-      runRelationshipPass: () => Promise.resolve(),
+      runRelationshipPass: (input) => {
+        relationshipContexts.push(input.relationshipStateOverride);
+        return Promise.resolve();
+      },
       runInnerThreadPass: () => Promise.resolve(),
     });
     const config = makeGuildConfig().semanticMaintenance;
@@ -108,6 +118,8 @@ describe("semantic maintenance sweep", () => {
     expect(contexts[1]).not.toContain("Portable marker");
     expect(profiles).toEqual(["sweep-profile", "sweep-profile"]);
     expect(sources).toEqual(["sweep", "sweep"]);
+    expect(relationshipContexts).toHaveLength(1);
+    expect(relationshipContexts[0]).toContain("@u1 (u1)");
   });
 
   test("runs a new scope once and persists cadence across runtime recreation", async () => {
