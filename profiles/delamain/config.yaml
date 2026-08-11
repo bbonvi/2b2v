@@ -224,7 +224,7 @@ contextHistory:
     messageCharLimit: 200 # Max chars for bounded older and auxiliary history rows
 
 ambientInitiative:
-    enabled: true # (allow proactive non-triggered initiative in the main channel)
+    enabled: false # (allow proactive non-triggered initiative in the main channel)
     botContactIds:
         - "1130796465049042954" # (2B production Discord user ID)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
