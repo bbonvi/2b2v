@@ -40,6 +40,8 @@ describe("semantic maintenance burst", () => {
     const mutations: string[] = [];
     const seenSections: string[][] = [];
     const seenProfiles: string[] = [];
+    let memoryStartedFresh = false;
+    let memoryPromptContext: unknown;
     let sweepRequest: MemoryExtractionRequest | undefined;
     const coordinator = new SemanticMaintenanceCoordinator();
     const guildConfig = makeGuildConfig({
@@ -56,6 +58,7 @@ describe("semantic maintenance burst", () => {
       recentContext: "history",
       visibleReplySent: true,
       maintenanceTranscript: [{ role: "assistant", content: "actor evidence" }],
+      promptContext: { actor: true } as unknown as NonNullable<MemoryExtractionRequest["promptContext"]>,
       incomingMessage: {
         content: "hello",
         guildId: "g1",
@@ -100,6 +103,8 @@ describe("semantic maintenance burst", () => {
         writer("record_inner_threads", dryRun, mutations),
       ],
       runMemoryPass: async (input) => {
+        memoryStartedFresh = input.startNewTranscript;
+        memoryPromptContext = input.memoryRequest.promptContext;
         seenSections.push(input.memoryRequest.context.sections.map((section) => section.label));
         seenProfiles.push(input.modelProfile);
         input.memoryRequest.maintenanceTranscript = [{ role: "assistant", content: "burst transcript" }];
@@ -136,6 +141,8 @@ describe("semantic maintenance burst", () => {
       ["Chat History — Newer"],
     ]);
     expect(seenProfiles).toEqual(["burst-profile", "burst-profile", "burst-profile"]);
+    expect(memoryStartedFresh).toBe(true);
+    expect(memoryPromptContext).toBe(request.promptContext);
     expect(sweepRequest).toBe(request);
     expect(sweepRequest?.maintenanceTranscript).toEqual([{ role: "assistant", content: "actor evidence" }]);
     expect(mutations).toHaveLength(3);

@@ -453,7 +453,7 @@ describe("handleMessage", () => {
     expect(JSON.stringify(promptPayloads)).not.toContain("Silent Memory Pass");
   });
 
-  test("Codex maintenance extends the actor tool surface without changing its immediate prefix", async () => {
+  test("Codex fresh maintenance reuses the actor cache surface without reusing its transcript", async () => {
     const makeMaintenanceTool = (name: string): AgentTool => ({
       name,
       label: name,
@@ -501,7 +501,11 @@ describe("handleMessage", () => {
       provider: "openai-codex" as const,
       model: "gpt-5.6-sol",
       transport: makePromptTransportConfig().openaiCodex,
-      stableSections: [{ role: "developer" as const, text: "STABLE ACTOR PROMPT", target: "input" as const }],
+      stableSections: [
+        { role: "developer" as const, text: "STABLE ACTOR CORE", target: "input" as const },
+        { role: "developer" as const, text: "## Skills\nSTABLE SKILL INDEX", target: "input" as const },
+        { role: "developer" as const, text: "STABLE RUNTIME CORE", target: "input" as const },
+      ],
       initialRoles: ["user" as const],
       sessionId: "actor-session",
       promptCacheKey: "actor-cache-key",
@@ -514,14 +518,18 @@ describe("handleMessage", () => {
       immediate: string[];
       deferred: string[];
       messages: OpenRouterMessage[];
+      stablePayload: string;
     }> = [];
     const completeChat: ChatCompleteFn = (request) => {
       const placement = splitDeferredTools(buildCodexContext(request), true);
+      const stablePayload = { input: [{ role: "user", content: "volatile" }] };
+      request.onPayload?.(stablePayload);
       placements.push({
         ...(request.promptCacheKey !== undefined ? { promptCacheKey: request.promptCacheKey } : {}),
         immediate: placement.immediate.map((tool) => tool.name),
         deferred: [...placement.deferred.keys()],
         messages: structuredClone(request.messages),
+        stablePayload: JSON.stringify(stablePayload),
       });
       return Promise.resolve({
         text: "",
@@ -546,14 +554,17 @@ describe("handleMessage", () => {
       completeChat,
     };
 
-    await runSilentToolAgentPass({
+    const memoryResult = await runSilentToolAgentPass({
       ...common,
       tools: [searchTools, fetchUrl, recordMemory, recordRelationship],
       controlMessage: "Memory Maintenance",
       terminateAfterSuccessfulToolRoundNames: ["record_memory"],
+      startNewTranscript: true,
     });
-    await runSilentToolAgentPass({
+    const relationshipResult = await runSilentToolAgentPass({
       ...common,
+      transcript: memoryResult.transcript,
+      promptContext: memoryResult.promptContext,
       tools: [searchTools, fetchUrl, recordMemory, recordRelationship],
       controlMessage: "Relationship Maintenance",
       terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
@@ -564,16 +575,17 @@ describe("handleMessage", () => {
       "actor-cache-key",
       "actor-cache-key",
     ]);
-    expect(placements[0]?.immediate).toEqual(["search_tools"]);
-    expect(placements[0]?.deferred).toEqual(["fetch_url", "record_memory"]);
-    expect(placements[1]?.immediate).toEqual(["search_tools"]);
+    expect(placements[0]?.immediate).toEqual(["search_tools", "fetch_url"]);
+    expect(placements[0]?.deferred).toEqual(["record_memory"]);
+    expect(placements[1]?.immediate).toEqual(["search_tools", "fetch_url"]);
     expect(placements[1]?.deferred).toEqual([
-      "fetch_url",
       "record_memory",
       "record_relationship",
     ]);
-    expect(placements[0]?.messages.slice(0, actorTranscript.length)).toEqual(actorTranscript);
-    expect(promptContext.activeToolNames).toEqual([
+    expect(placements[0]?.messages.slice(0, actorTranscript.length)).not.toEqual(actorTranscript);
+    expect(JSON.stringify(placements[0]?.messages)).toContain("## Completed Actor Turn Evidence");
+    expect(placements[0]?.stablePayload).toContain("## Skills\\nSTABLE SKILL INDEX");
+    expect(relationshipResult.promptContext?.activeToolNames).toEqual([
       "search_tools",
       "fetch_url",
       "record_memory",

@@ -267,6 +267,7 @@ async function runMemoryPostReplyExtraction(input: {
   modelProfile?: string;
   deferCommit?: boolean;
   memoryContextOverride?: string;
+  startNewTranscript?: boolean;
 }): Promise<{ requestId?: string; enabled: boolean; ran: boolean; error?: string }> {
   if (!input.guildConfig.memoryExtraction.postReply || !hasMaintenanceMaterial(input.memoryRequest)) {
     return { enabled: input.guildConfig.memoryExtraction.postReply, ran: false };
@@ -346,6 +347,7 @@ async function runMemoryPostReplyExtraction(input: {
       ),
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
+      startNewTranscript: input.startNewTranscript,
       requestLog: memoryLog,
       log: log.child({ guildId, channelId, requestId: memoryLog.requestId, component: "memory-pass" }),
       ...(input.modelProfile === undefined ? {} : { modelProfile: input.modelProfile }),

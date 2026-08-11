@@ -128,6 +128,8 @@ export interface SilentMemoryAgentInput {
   tools: AgentTool[];
   transcript?: OpenRouterMessage[];
   promptContext?: MaintenancePromptContext;
+  /** Start from rebuilt context while retaining compatible stable prompt cache metadata. */
+  startNewTranscript?: boolean;
   log?: Logger;
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
@@ -159,6 +161,8 @@ export interface SilentToolAgentInput {
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   transcript?: OpenRouterMessage[];
   promptContext?: MaintenancePromptContext;
+  /** Start from rebuilt context while retaining compatible stable prompt cache metadata. */
+  startNewTranscript?: boolean;
   log?: Logger;
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;

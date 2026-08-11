@@ -23,6 +23,7 @@ type MemoryPass = (input: BurstInput & {
   currentUsername?: string;
   maintenanceTools: AgentTool[];
   burstContext: true;
+  startNewTranscript: true;
   deferCommit: true;
   modelProfile: string;
 }) => Promise<unknown>;
@@ -88,9 +89,8 @@ export function createSemanticMaintenanceBurst(input: {
       ?? burst.memoryRequest.incomingMessage.authorId;
     const currentUsername = input.resolvePromptUsername(burst.guild, currentUserId)
       ?? burst.memoryRequest.incomingMessage.authorUsername;
-    const { promptContext: _promptContext, ...requestWithoutPromptContext } = burst.memoryRequest;
     const request: MemoryExtractionRequest = {
-      ...requestWithoutPromptContext,
+      ...burst.memoryRequest,
       context: {
         ...burst.memoryRequest.context,
         sections: burst.memoryRequest.context.sections.filter((section) => !semanticSectionLabels.has(section.label)),
@@ -123,6 +123,7 @@ export function createSemanticMaintenanceBurst(input: {
         currentUsername,
         maintenanceTools: stagedTools,
         burstContext: true,
+        startNewTranscript: true,
         deferCommit: true,
         modelProfile: burst.guildConfig.semanticMaintenance.burst.modelProfile,
       });

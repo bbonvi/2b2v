@@ -173,15 +173,18 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   const inheritedActiveTools = inheritedActiveToolNames
     .map((name) => timedToolsByName.get(name))
     .filter((tool): tool is AgentTool => tool !== undefined);
-  const canContinueActorToolSurface = provider === "openai-codex"
+  const canReuseActorCacheSurface = provider === "openai-codex"
     && inheritedPromptCompatible
-    && input.transcript !== undefined
     && inheritedActiveToolNames.length > 0
     && inheritedActiveTools.length === inheritedActiveToolNames.length
     && inheritedPrompt.toolContractSignature !== undefined
     && toolContractSignature(inheritedActiveTools) === inheritedPrompt.toolContractSignature
     && inheritedActiveToolNames.includes("search_tools");
-  const canReuseInheritedTranscript = inheritedPromptCompatible
+  const canContinueActorToolSurface = canReuseActorCacheSurface
+    && input.startNewTranscript !== true
+    && input.transcript !== undefined;
+  const canReuseInheritedTranscript = input.startNewTranscript !== true
+    && inheritedPromptCompatible
     && (provider !== "openai-codex" || canContinueActorToolSurface);
 
   const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
@@ -198,7 +201,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : buildProviderSessionId(input.requestLog, provider, model.id);
   const promptCacheKey = provider === "openai-codex"
     ? promptCaching.enabled
-      ? canContinueActorToolSurface && inheritedPrompt.promptCacheKey !== undefined
+      ? canReuseActorCacheSurface && inheritedPrompt.promptCacheKey !== undefined
         ? inheritedPrompt.promptCacheKey
         : buildCodexPromptCacheKey(
             input.globalConfig.runtimeProfileId ?? "default",
@@ -210,7 +213,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : undefined;
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
   const volatileMessages = buildVolatileTurnMessages(input.context);
-  const initialRoles = inheritedPromptCompatible
+  const initialRoles = inheritedPromptCompatible && input.startNewTranscript !== true
     ? inheritedPrompt.initialRoles
     : initialMessageRoles(transport, volatileMessages);
   const messages = (canReuseInheritedTranscript ? input.transcript : undefined) ?? buildInitialMessages(
@@ -238,7 +241,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : hasMaintenanceSearchTool
       ? initialMaintenanceToolNames(timedTools)
       : new Set(timedTools.map((tool) => tool.name));
-  const maintenanceInitialToolNames = canContinueActorToolSurface
+  const maintenanceInitialToolNames = canReuseActorCacheSurface
       ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
       : fallbackMaintenanceInitialToolNames;
   const newlyActiveMaintenanceTools = maintenanceToolNames
