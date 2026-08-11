@@ -59,7 +59,9 @@ function freshContext() {
       { label: "Memories", text: "fresh automatic memory", cached: false, role: "developer" as const },
       { label: "Relationships", text: "fresh automatic relationship", cached: false, role: "developer" as const },
       { label: "Inner Threads", text: "fresh automatic thread", cached: false, role: "developer" as const },
+      { label: "Chat History — Older", text: "fresh older history", cached: true, role: "system" as const },
       { label: "Chat History — Newer", text: "fresh standard history", cached: false, role: "developer" as const },
+      { label: "Discord Context", text: "fresh channel metadata", cached: false, role: "developer" as const },
     ],
   };
 }
@@ -148,9 +150,10 @@ describe("semantic maintenance sweep", () => {
     expect(passRequests[0]).not.toBe(actorRequest);
     expect(passRequests[0]?.promptContext).toBeUndefined();
     expect(passRequests[0]?.assistantReply).toBe("");
-    expect(passRequests[0]?.incomingMessage.currentContentInHistory).toBe(true);
-    expect(passRequests[0]?.context.sections.map((section) => section.label)).toEqual(["Chat History — Newer"]);
-    expect(passRequests[0]?.context.sections[0]?.text).toBe("fresh standard history");
+    expect(passRequests[0]?.incomingMessage.bareCurrentTurn).toBe(true);
+    expect(passRequests[0]?.incomingMessage.currentContentInHistory).toBe(false);
+    expect(passRequests[0]?.context.sections.map((section) => section.label)).toEqual(["Discord Context"]);
+    expect(passRequests[0]?.context.sections[0]?.text).toBe("fresh channel metadata");
     expect(passRequests[1]).toBe(passRequests[0]);
     expect(passRequests[1]?.maintenanceTranscript).toEqual([{ role: "assistant", content: "sweep memory result" }]);
     expect(actorRequest.maintenanceTranscript).toEqual([{ role: "assistant", content: "actor transcript" }]);

@@ -714,6 +714,7 @@ const runSemanticMaintenanceSweep = createSemanticMaintenanceSweep({
       undefined,
       {
         appendLatestToHistory: false,
+        includeHistory: false,
         ...(trigger.memoryRequest.context.memoryFocusUserId === undefined
           ? {}
           : { memoryFocusUserId: trigger.memoryRequest.context.memoryFocusUserId }),

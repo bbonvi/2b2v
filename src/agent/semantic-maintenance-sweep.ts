@@ -113,7 +113,13 @@ export function createSemanticMaintenanceSweep(input: {
     const freshContext = await input.buildContext(trigger);
     const context = {
       ...freshContext,
-      sections: freshContext.sections.filter((section) => !["Memories", "Relationships", "Inner Threads"].includes(section.label)),
+      sections: freshContext.sections.filter((section) => ![
+        "Memories",
+        "Relationships",
+        "Inner Threads",
+        "Chat History — Older",
+        "Chat History — Newer",
+      ].includes(section.label)),
     };
     const { maintenanceTranscript: _transcript, promptContext: _promptContext, ...actorRequest } = trigger.memoryRequest;
     const memoryRequest: MemoryExtractionRequest = {
@@ -126,7 +132,8 @@ export function createSemanticMaintenanceSweep(input: {
       context,
       incomingMessage: {
         ...actorRequest.incomingMessage,
-        currentContentInHistory: true,
+        bareCurrentTurn: true,
+        currentContentInHistory: false,
         imageInputs: undefined,
       },
     };
