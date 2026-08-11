@@ -6,6 +6,7 @@ import {
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_REPERTOIRE,
+  DEFAULT_SEMANTIC_MAINTENANCE,
 } from "./defaults.ts";
 import type {
   AgentJobsConfig,
@@ -24,8 +25,11 @@ import type {
   SchedulePressureConfig,
   SchedulePressureConfigYaml,
   TypingSimulationConfig,
+  SemanticMaintenanceConfig,
+  SemanticMaintenanceConfigYaml,
 } from "./types.ts";
 import { relativeDurationToMilliseconds } from "../time/relative-duration.ts";
+import { parseDurationMs } from "../modes/duration.ts";
 
 export function resolveGlobalReplyLoop(
   partial: MainConfigYaml["replyLoop"] | undefined
@@ -117,6 +121,59 @@ function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefi
   if (!Number.isFinite(config.ambient.minIntervalSeconds) || config.ambient.minIntervalSeconds < 0) {
     throw new Error(`${keyPrefix}.ambient.minIntervalSeconds must be >= 0`);
   }
+}
+
+/** Resolve profile defaults or a per-guild semantic-maintenance override. */
+export function resolveSemanticMaintenanceConfig(
+  base: SemanticMaintenanceConfig | undefined,
+  partial: SemanticMaintenanceConfigYaml | undefined,
+): SemanticMaintenanceConfig {
+  const fallback = base ?? DEFAULT_SEMANTIC_MAINTENANCE;
+  const resolved: SemanticMaintenanceConfig = {
+    burst: {
+      enabled: partial?.burst?.enabled ?? fallback.burst.enabled,
+      modelProfile: partial?.burst?.modelProfile ?? fallback.burst.modelProfile,
+      quietAfterMs: partial?.burst?.quietAfter === undefined
+        ? fallback.burst.quietAfterMs
+        : parseDurationMs(partial.burst.quietAfter, "semanticMaintenance.burst.quietAfter"),
+      maxWaitMs: partial?.burst?.maxWait === undefined
+        ? fallback.burst.maxWaitMs
+        : parseDurationMs(partial.burst.maxWait, "semanticMaintenance.burst.maxWait"),
+      memoryMaxRows: partial?.burst?.memoryMaxRows ?? fallback.burst.memoryMaxRows,
+      memoryMaxChars: partial?.burst?.memoryMaxChars ?? fallback.burst.memoryMaxChars,
+    },
+    sweep: {
+      enabled: partial?.sweep?.enabled ?? fallback.sweep.enabled,
+      modelProfile: partial?.sweep?.modelProfile ?? fallback.sweep.modelProfile,
+      everyMs: partial?.sweep?.every === undefined
+        ? fallback.sweep.everyMs
+        : parseDurationMs(partial.sweep.every, "semanticMaintenance.sweep.every"),
+      memories: { ...fallback.sweep.memories, ...partial?.sweep?.memories },
+      relationships: { ...fallback.sweep.relationships, ...partial?.sweep?.relationships },
+      innerThreads: { ...fallback.sweep.innerThreads, ...partial?.sweep?.innerThreads },
+    },
+  };
+  if (resolved.burst.maxWaitMs < resolved.burst.quietAfterMs) {
+    throw new Error("semanticMaintenance.burst.maxWait must be at least quietAfter");
+  }
+  const positiveInteger = (value: number, field: string): void => {
+    if (!Number.isInteger(value) || value < 1) throw new Error(`${field} must be a positive integer`);
+  };
+  positiveInteger(resolved.burst.memoryMaxRows, "semanticMaintenance.burst.memoryMaxRows");
+  positiveInteger(resolved.burst.memoryMaxChars, "semanticMaintenance.burst.memoryMaxChars");
+  positiveInteger(resolved.sweep.memories.maxRows, "semanticMaintenance.sweep.memories.maxRows");
+  positiveInteger(resolved.sweep.memories.maxChars, "semanticMaintenance.sweep.memories.maxChars");
+  positiveInteger(resolved.sweep.relationships.maxProfiles, "semanticMaintenance.sweep.relationships.maxProfiles");
+  positiveInteger(resolved.sweep.relationships.maxChars, "semanticMaintenance.sweep.relationships.maxChars");
+  positiveInteger(resolved.sweep.innerThreads.maxRows, "semanticMaintenance.sweep.innerThreads.maxRows");
+  positiveInteger(resolved.sweep.innerThreads.maxChars, "semanticMaintenance.sweep.innerThreads.maxChars");
+  for (const [profile, field] of [
+    [resolved.burst.modelProfile, "semanticMaintenance.burst.modelProfile"],
+    [resolved.sweep.modelProfile, "semanticMaintenance.sweep.modelProfile"],
+  ] as const) {
+    if (profile.trim() === "") throw new Error(`${field} must not be empty`);
+  }
+  return resolved;
 }
 
 export function resolveMemoryContext(

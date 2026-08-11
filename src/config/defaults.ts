@@ -13,6 +13,7 @@ import type {
   LlmProvider,
   MembersConfig,
   MemoryExtractionConfig,
+  SemanticMaintenanceConfig,
   NotebooksConfig,
   PromptCachingConfig,
   PromptTransportConfig,
@@ -62,6 +63,25 @@ export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     everyMessages: 300,
     maxBatchMessages: 300,
     minIntervalSeconds: 600,
+  },
+};
+
+export const DEFAULT_SEMANTIC_MAINTENANCE: SemanticMaintenanceConfig = {
+  burst: {
+    enabled: true,
+    modelProfile: "main",
+    quietAfterMs: 2 * 60 * 1000,
+    maxWaitMs: 4 * 60 * 1000,
+    memoryMaxRows: 300,
+    memoryMaxChars: 60_000,
+  },
+  sweep: {
+    enabled: true,
+    modelProfile: "main",
+    everyMs: 6 * 60 * 60 * 1000,
+    memories: { maxRows: 300, maxChars: 60_000 },
+    relationships: { maxProfiles: 12, maxChars: 60_000 },
+    innerThreads: { maxRows: 100, maxChars: 60_000 },
   },
 };
 

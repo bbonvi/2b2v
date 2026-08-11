@@ -2,7 +2,7 @@ import type { AssembledContext } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { ChatCompleteFn, HandlerDeps, IncomingMessage, MessageSender } from "./turn-types.ts";
-import { DEFAULT_AGENT_JOBS } from "../config/defaults.ts";
+import { DEFAULT_AGENT_JOBS, DEFAULT_SEMANTIC_MAINTENANCE } from "../config/defaults.ts";
 
 export const TEST_RUNTIME_PROMPTS = {
   reply: "# Runtime Core\nReserved action directives.",
@@ -144,6 +144,7 @@ export function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalC
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
+    defaultSemanticMaintenance: DEFAULT_SEMANTIC_MAINTENANCE,
     repertoire: {
       enabled: false,
       lookbackHours: 48,
@@ -224,6 +225,7 @@ export function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConf
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
+    semanticMaintenance: DEFAULT_SEMANTIC_MAINTENANCE,
     ...overrides,
   };
 }

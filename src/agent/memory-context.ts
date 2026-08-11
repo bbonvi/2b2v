@@ -60,6 +60,7 @@ export interface MemoryMaintenanceContextInput {
   guildId: string;
   afterId: number;
   limit: number;
+  scope?: "available" | "portable" | "guild";
   resolveUserId?: (userId: string) => string | undefined;
 }
 
@@ -264,13 +265,20 @@ export function buildMemoryMaintenanceContext(input: MemoryMaintenanceContextInp
     guildId: input.guildId,
     afterId: input.afterId,
     limit: input.limit,
+    scope: input.scope,
   });
   if (batch.rows.length === 0) return { text: "", nextCursorId: batch.nextCursorId };
+  const orderedRows = [...batch.rows].sort((left, right) => {
+    const priorityDifference = left.priority - right.priority;
+    if (priorityDifference !== 0) return priorityDifference;
+    const updatedDifference = left.updatedAt - right.updatedAt;
+    return updatedDifference !== 0 ? updatedDifference : left.id - right.id;
+  });
   return {
     text: [
       "## Rotating Memory Maintenance Candidates",
       "Review these stored rows independently of the current chat. Repair, split, consolidate, or delete them when their clean durable structure is clear; otherwise leave them unchanged.",
-      ...batch.rows.map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId)),
+      ...orderedRows.map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId)),
     ].join("\n"),
     nextCursorId: batch.nextCursorId,
   };

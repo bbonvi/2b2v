@@ -379,6 +379,45 @@ export interface MemoryContextConfig {
   maxRows: number;
 }
 
+/** Debounced semantic maintenance and infrequent corpus review. */
+export interface SemanticMaintenanceConfig {
+  burst: {
+    enabled: boolean;
+    modelProfile: string;
+    quietAfterMs: number;
+    maxWaitMs: number;
+    memoryMaxRows: number;
+    memoryMaxChars: number;
+  };
+  sweep: {
+    enabled: boolean;
+    modelProfile: string;
+    everyMs: number;
+    memories: { maxRows: number; maxChars: number };
+    relationships: { maxProfiles: number; maxChars: number };
+    innerThreads: { maxRows: number; maxChars: number };
+  };
+}
+
+export interface SemanticMaintenanceConfigYaml {
+  burst?: {
+    enabled?: boolean;
+    modelProfile?: string;
+    quietAfter?: string;
+    maxWait?: string;
+    memoryMaxRows?: number;
+    memoryMaxChars?: number;
+  };
+  sweep?: {
+    enabled?: boolean;
+    modelProfile?: string;
+    every?: string;
+    memories?: Partial<{ maxRows: number; maxChars: number }>;
+    relationships?: Partial<{ maxProfiles: number; maxChars: number }>;
+    innerThreads?: Partial<{ maxRows: number; maxChars: number }>;
+  };
+}
+
 /** Cross-room samples of the persona's recent conversational expression. */
 export interface RepertoireConfig {
   enabled: boolean;
@@ -575,6 +614,8 @@ export interface GuildConfig {
   memoryExtraction: MemoryExtractionConfig;
   /** Bounded durable memory context for ordinary actor turns. */
   memoryContext?: MemoryContextConfig;
+  /** Debounced semantic maintenance behavior. */
+  semanticMaintenance: SemanticMaintenanceConfig;
   /** Durable relationship-profile behavior. */
   relationships?: RelationshipConfig;
   /** Durable private inner-thread behavior. */
@@ -641,6 +682,8 @@ export interface GlobalConfig {
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
   defaultMemoryContext?: MemoryContextConfig;
+  /** Default debounced semantic maintenance behavior. */
+  defaultSemanticMaintenance: SemanticMaintenanceConfig;
   /** Profile-wide cross-room conversational repertoire. */
   repertoire: RepertoireConfig;
   /** Default durable relationship-profile behavior. */
@@ -726,6 +769,7 @@ export interface GuildConfigYaml {
     };
   };
   memoryContext?: Partial<MemoryContextConfig>;
+  semanticMaintenance?: SemanticMaintenanceConfigYaml;
 }
 
 /** Raw shape of a profile's config YAML file. All optional. */
@@ -813,6 +857,7 @@ export interface MainConfigYaml {
     };
   };
   memoryContext?: Partial<MemoryContextConfig>;
+  semanticMaintenance?: SemanticMaintenanceConfigYaml;
   repertoire?: Partial<RepertoireConfig>;
 }
 

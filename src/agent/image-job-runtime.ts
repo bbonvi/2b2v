@@ -47,6 +47,7 @@ export function createImageJobRuntime(input: {
   runMemoryPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runMemoryPostReplyExtraction"];
   runRelationshipPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runRelationshipPostReplyExtraction"];
   runInnerThreadPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runInnerThreadPostReplyExtraction"];
+  runPostReplyMaintenanceBurst: ReturnType<typeof createMaintenanceRuntime>["runPostReplyMaintenanceBurst"];
   createBotDiscordMessageSender: ReturnType<typeof createTurnRuntime>["createBotDiscordMessageSender"];
   createTtsGenerator: ReturnType<typeof createTurnRuntime>["createTtsGenerator"];
   createHandlerDeps: ReturnType<typeof createTurnRuntime>["createHandlerDeps"];
@@ -58,7 +59,7 @@ export function createImageJobRuntime(input: {
   enqueueChannelTask: (guildId: string, channelId: string, task: () => Promise<void>) => Promise<void>;
   resumeAgentJob: (jobId: string) => void;
 }) {
-  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask, resumeAgentJob } = input;
+  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runPostReplyMaintenanceBurst, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask, resumeAgentJob } = input;
 function resumeOwner(childJobId: string): void {
   const queued = agentJobs.publishChildResult(childJobId);
   if (queued.shouldRun && queued.parentJobId !== undefined) resumeAgentJob(queued.parentJobId);
@@ -273,32 +274,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         afterReply: async (memoryRequest) => {
-          await runMemoryPostReplyExtraction({
+          await runPostReplyMaintenanceBurst({
             guildConfig: deliveryGuildConfig,
             memoryRequest,
             guild,
             channel: textChannel,
             sourceRequestId: requestLog.requestId,
             source: `async_image_${input.event}`,
-            currentUserId: job.requesterId,
-            currentUsername: job.requesterUsername,
-          });
-          await runRelationshipPostReplyExtraction({
-            guildConfig: deliveryGuildConfig,
-            memoryRequest,
-            guild,
-            channel: textChannel,
-            sourceRequestId: requestLog.requestId,
-            source: `async_image_${input.event}`,
-            currentUserId: job.requesterId,
-            currentUsername: job.requesterUsername,
-          });
-          await runInnerThreadPostReplyExtraction({
-            guildConfig: deliveryGuildConfig,
-            memoryRequest,
-            guild,
-            channel: textChannel,
-            sourceRequestId: requestLog.requestId,
           });
         },
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {

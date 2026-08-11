@@ -447,20 +447,26 @@ export function countUserMemoriesByUser(db: Database, guildId: string): Map<stri
 /** Return a bounded, rotating slice of memories maintainable from one guild. */
 export function listMemoryMaintenanceBatch(
   db: Database,
-  input: { guildId: string; afterId: number; limit: number },
+  input: { guildId: string; afterId: number; limit: number; scope?: "available" | "portable" | "guild" },
 ): MemoryMaintenanceBatch {
   const limit = Math.max(1, Math.trunc(input.limit));
+  const scopeCondition = input.scope === "portable"
+    ? "recall_scope = 'anywhere'"
+    : input.scope === "guild"
+      ? "recall_scope = 'guild' AND recall_guild_id = ?"
+      : "(recall_scope = 'anywhere' OR recall_guild_id = ?)";
+  const scopeParams = input.scope === "portable" ? [] : [input.guildId];
   const select = (afterId: number): Record<string, unknown>[] => db.raw
     .prepare(
       `SELECT * FROM memories
        WHERE id > ?
          AND deleted_at IS NULL
          AND (expires_at IS NULL OR expires_at > ?)
-         AND (recall_scope = 'anywhere' OR recall_guild_id = ?)
+         AND ${scopeCondition}
        ORDER BY id ASC
        LIMIT ?`,
     )
-    .all(afterId, Date.now(), input.guildId, limit) as Record<string, unknown>[];
+    .all(afterId, Date.now(), ...scopeParams, limit) as Record<string, unknown>[];
 
   let rows = select(Math.max(0, Math.trunc(input.afterId)));
   if (rows.length === 0 && input.afterId > 0) rows = select(0);

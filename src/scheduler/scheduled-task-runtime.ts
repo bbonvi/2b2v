@@ -14,6 +14,7 @@ import { RequestLog, type Logger } from "../logger";
 import type { ScheduleFireEvent } from "./engine";
 import type { TtsResult } from "../tts/types";
 import { createUpdateCurrentScheduledTaskTool } from "./current-task-tool";
+import type { createMaintenanceRuntime } from "../agent/maintenance-runtime.ts";
 
 type TtsGenerator = {
   ttsEnabled: boolean;
@@ -110,6 +111,7 @@ export function createScheduledTaskRunner(input: {
     channel: unknown;
     sourceRequestId: string;
   }) => Promise<void>;
+  runPostReplyMaintenanceBurst: ReturnType<typeof createMaintenanceRuntime>["runPostReplyMaintenanceBurst"];
   onScheduleCompleted?: (scheduleId: string) => void;
   markScheduledAttentionBusy?: (guildId: string, channelId: string) => () => void;
   preparePersonaModeTurn?: (guildId: string) => void;
@@ -267,32 +269,13 @@ export function createScheduledTaskRunner(input: {
           disableLiveOutput: true,
           scheduledTaskRun: true,
           afterReply: async (memoryRequest) => {
-            await input.runMemoryPostReplyExtraction({
+            await input.runPostReplyMaintenanceBurst({
               guildConfig,
               memoryRequest,
               guild,
               channel: textChannel,
               sourceRequestId: requestLog.requestId,
               source: "scheduled",
-              currentUserId: "scheduler",
-              currentUsername: "scheduler",
-            });
-            await input.runRelationshipPostReplyExtraction({
-              guildConfig,
-              memoryRequest,
-              guild,
-              channel: textChannel,
-              sourceRequestId: requestLog.requestId,
-              source: "scheduled",
-              currentUserId: "scheduler",
-              currentUsername: "scheduler",
-            });
-            await input.runInnerThreadPostReplyExtraction({
-              guildConfig,
-              memoryRequest,
-              guild,
-              channel: textChannel,
-              sourceRequestId: requestLog.requestId,
             });
           },
         },

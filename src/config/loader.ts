@@ -58,6 +58,7 @@ import {
   resolveRelationshipConfig,
   resolveRepertoireConfig,
   resolveSchedulePressure,
+  resolveSemanticMaintenanceConfig,
   resolveTypingSimulationConfig,
 } from "./agent-config.ts";
 
@@ -167,6 +168,12 @@ export function loadGlobalConfig(
   const repertoire = resolveRepertoireConfig(yaml.repertoire);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultInnerThreads = resolveInnerThreadsConfig(undefined, yaml.innerThreads);
+  const semanticMaintenanceDefaults = resolveSemanticMaintenanceConfig(undefined, undefined);
+  const defaultSemanticMaintenance = resolveSemanticMaintenanceConfig({
+    ...semanticMaintenanceDefaults,
+    burst: { ...semanticMaintenanceDefaults.burst, modelProfile: defaultMemoryExtraction.modelProfile },
+    sweep: { ...semanticMaintenanceDefaults.sweep, modelProfile: defaultMemoryExtraction.modelProfile },
+  }, yaml.semanticMaintenance);
   const defaultNotebooks = resolveNotebooksConfig(undefined, yaml.notebooks);
   const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
@@ -177,6 +184,8 @@ export function loadGlobalConfig(
     [defaultMemoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
     [defaultRelationships.modelProfile, "relationships.modelProfile"],
     [defaultInnerThreads.modelProfile, "innerThreads.modelProfile"],
+    [defaultSemanticMaintenance.burst.modelProfile, "semanticMaintenance.burst.modelProfile"],
+    [defaultSemanticMaintenance.sweep.modelProfile, "semanticMaintenance.sweep.modelProfile"],
     [defaultVoice.modelProfile, "voice.modelProfile"],
     [defaultVoice.maintenance.summary.modelProfile, "voice.maintenance.summary.modelProfile"],
     [defaultVoice.maintenance.extraction.modelProfile, "voice.maintenance.extraction.modelProfile"],
@@ -251,6 +260,7 @@ export function loadGlobalConfig(
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction,
     defaultMemoryContext,
+    defaultSemanticMaintenance,
     repertoire,
     defaultRelationships,
     defaultInnerThreads,
@@ -344,6 +354,7 @@ export function resolveGuildConfig(
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
     memoryContext: resolveMemoryContext(global.defaultMemoryContext, partial.memoryContext),
+    semanticMaintenance: resolveSemanticMaintenanceConfig(global.defaultSemanticMaintenance, partial.semanticMaintenance),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
     innerThreads: resolveInnerThreadsConfig(global.defaultInnerThreads, partial.innerThreads),
     notebooks: resolveNotebooksConfig(global.defaultNotebooks, partial.notebooks),
@@ -360,6 +371,8 @@ export function resolveGuildConfig(
     ...(config.innerThreads !== undefined
       ? [[config.innerThreads.modelProfile, "innerThreads.modelProfile"] as const]
       : []),
+    [config.semanticMaintenance.burst.modelProfile, "semanticMaintenance.burst.modelProfile"],
+    [config.semanticMaintenance.sweep.modelProfile, "semanticMaintenance.sweep.modelProfile"],
     ...(config.voice !== undefined
       ? [
         [config.voice.modelProfile, "voice.modelProfile"] as const,
@@ -438,6 +451,24 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,
     memoryContext: config.memoryContext,
+    semanticMaintenance: {
+      burst: {
+        enabled: config.semanticMaintenance.burst.enabled,
+        modelProfile: config.semanticMaintenance.burst.modelProfile,
+        quietAfter: `${config.semanticMaintenance.burst.quietAfterMs}ms`,
+        maxWait: `${config.semanticMaintenance.burst.maxWaitMs}ms`,
+        memoryMaxRows: config.semanticMaintenance.burst.memoryMaxRows,
+        memoryMaxChars: config.semanticMaintenance.burst.memoryMaxChars,
+      },
+      sweep: {
+        enabled: config.semanticMaintenance.sweep.enabled,
+        modelProfile: config.semanticMaintenance.sweep.modelProfile,
+        every: `${config.semanticMaintenance.sweep.everyMs}ms`,
+        memories: config.semanticMaintenance.sweep.memories,
+        relationships: config.semanticMaintenance.sweep.relationships,
+        innerThreads: config.semanticMaintenance.sweep.innerThreads,
+      },
+    },
   };
 
   // Strip undefined keys before serializing

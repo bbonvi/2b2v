@@ -12,6 +12,13 @@ export interface MaintenanceCommitTicket {
   skip(): void;
 }
 
+interface PendingBurst {
+  firstAt: number;
+  timer: ReturnType<typeof setTimeout>;
+  run: () => Promise<void>;
+  waiters: Array<{ resolve: () => void; reject: (error: unknown) => void }>;
+}
+
 /**
  * Order semantic mutation batches by source event while allowing their model
  * inference and validation work to run concurrently.
@@ -19,6 +26,39 @@ export interface MaintenanceCommitTicket {
 export class SemanticMaintenanceCoordinator {
   private nextSequence = 1;
   private tail = Promise.resolve();
+  private readonly pendingBursts = new Map<string, PendingBurst>();
+
+  /** Debounce one channel while enforcing a maximum wait from its first action. */
+  scheduleBurst(input: {
+    key: string;
+    quietAfterMs: number;
+    maxWaitMs: number;
+    run: () => Promise<void>;
+    now?: number;
+  }): Promise<void> {
+    const now = input.now ?? Date.now();
+    const existing = this.pendingBursts.get(input.key);
+    const firstAt = existing?.firstAt ?? now;
+    if (existing !== undefined) clearTimeout(existing.timer);
+    const waiters = existing?.waiters ?? [];
+    const promise = new Promise<void>((resolve, reject) => waiters.push({ resolve, reject }));
+    const dueAt = Math.min(now + input.quietAfterMs, firstAt + input.maxWaitMs);
+    const pending: PendingBurst = {
+      firstAt,
+      run: input.run,
+      waiters,
+      timer: setTimeout(() => {
+        if (this.pendingBursts.get(input.key) !== pending) return;
+        this.pendingBursts.delete(input.key);
+        void pending.run().then(
+          () => pending.waiters.forEach((waiter) => waiter.resolve()),
+          (error: unknown) => pending.waiters.forEach((waiter) => waiter.reject(error)),
+        );
+      }, Math.max(0, dueAt - now)),
+    };
+    this.pendingBursts.set(input.key, pending);
+    return promise;
+  }
 
   reserve(): MaintenanceCommitTicket {
     const sequence = this.nextSequence++;

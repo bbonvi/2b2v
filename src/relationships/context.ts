@@ -234,6 +234,20 @@ export function renderRelationshipMaintenanceContext(input: {
   ].join("\n\n");
 }
 
+/** Render complete selected profiles for infrequent relationship cleanup. */
+export function renderRelationshipSweepContext(input: ReadonlyArray<{
+  profile: RelationshipProfile;
+  label: string;
+  events?: readonly RelationshipEvent[];
+}>): string {
+  if (input.length === 0) return "";
+  return [
+    "## Long-Term Relationship Candidates",
+    "Review clear duplicate, obsolete, inconsistent, or resolved notes, boundaries, and open matters. Durable axes do not decay with age. Use message tools only for targeted uncertainty.",
+    ...input.map((entry) => renderRelationshipMaintenanceContext({ current: entry })),
+  ].join("\n\n");
+}
+
 function shortPortrait(profile: RelationshipProfile): string {
   return relationshipPortrait(profile.axes).compactProse;
 }

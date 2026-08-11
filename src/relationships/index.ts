@@ -2,6 +2,7 @@ export * from "./context";
 export * from "./engine";
 export * from "./portrait";
 export * from "./prior-exchanges";
+export * from "./read-tool";
 export * from "./repository";
 export * from "./state";
 export * from "./tool";

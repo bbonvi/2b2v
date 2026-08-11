@@ -95,6 +95,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const triggerContext = [
     passKind === "ambient"
       ? "## Memory Maintenance Review — Periodic Trigger"
+      : passKind === "sweep"
+        ? "## Memory Maintenance Review — Long-Term Sweep"
       : "## Memory Maintenance Review — Post-Reply Trigger",
     "Current time for expiresIn and importantUntil decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
@@ -110,7 +112,9 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
         {},
         "Review ambient chat history for durable memory.",
       )
-      : "",
+      : passKind === "sweep"
+        ? "Review the supplied stored-memory corpus for clear conflicts, duplicates, obsolete state, or poor structure. Age alone is not a reason to change a memory. Use message tools only for targeted uncertainty."
+        : "",
     runtimeContextTemplate(
       input.runtimePrompts,
       "memory-pass-decision",
@@ -229,9 +233,8 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     .filter((name) => name.startsWith("record_") && timedToolsByName.has(name));
   const hasMaintenanceSearchTool = timedTools.some((tool) => tool.name === "search_tools");
   const fallbackMaintenanceInitialToolNames = maintenanceToolNames.length > 0 && hasMaintenanceSearchTool
-    ? new Set(timedTools
-        .map((tool) => tool.name)
-        .filter((name) => name === "search_tools" || maintenanceToolNames.includes(name)))
+    ? new Set([...initialMaintenanceToolNames(timedTools)]
+        .filter((name) => !name.startsWith("record_") || maintenanceToolNames.includes(name)))
     : hasMaintenanceSearchTool
       ? initialMaintenanceToolNames(timedTools)
       : new Set(timedTools.map((tool) => tool.name));
@@ -350,7 +353,7 @@ export async function runSilentMemoryAgentPass(
     ...input,
     runtimeInstruction: buildRuntimeInstruction(input.runtimePrompts),
     controlMessage: memoryPassControlMessage(input),
-    modelProfile: input.guildConfig.memoryExtraction.modelProfile,
+    modelProfile: input.modelProfile ?? input.guildConfig.memoryExtraction.modelProfile,
     maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls,
     terminateAfterSuccessfulToolRoundNames: ["record_memory"],
   });

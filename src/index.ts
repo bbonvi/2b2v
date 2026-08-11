@@ -291,11 +291,12 @@ const maintenanceRuntime = createMaintenanceRuntime({
   resolveKnownUsername,
   resolvePromptUsername,
   markMemoryExtractionCheckpointFromContext,
+  semanticMaintenanceCoordinator,
 });
 const {
   blockToolsExcept, latestHumanIdentity, createPostReplyMaintenanceTools,
   runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction,
-  runInnerThreadPostReplyExtraction, runPrivateLifeMaintenance,
+  runInnerThreadPostReplyExtraction, runPostReplyMaintenanceBurst, runPrivateLifeMaintenance,
   createPrivateLifeMaintenanceTools,
 } = maintenanceRuntime;
 
@@ -336,6 +337,7 @@ const imageJobRuntime = createImageJobRuntime({
   runMemoryPostReplyExtraction,
   runRelationshipPostReplyExtraction,
   runInnerThreadPostReplyExtraction,
+  runPostReplyMaintenanceBurst,
   createBotDiscordMessageSender,
   createTtsGenerator,
   createHandlerDeps,
@@ -370,6 +372,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps,
     resolveAssetAttachments: createAssetAttachmentResolver, runLoggedAgentTurn,
     runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction,
+    runPostReplyMaintenanceBurst,
     onScheduleCompleted: (id) => scheduler.removeSchedule(id),
     markScheduledAttentionBusy,
     preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
@@ -420,7 +423,7 @@ const messageTurnRuntime = createMessageTurnRuntime({
   createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver,
   runLoggedAgentTurn, createTtsGenerator, blockToolsExcept,
   createPostReplyMaintenanceTools, runMemoryPostReplyExtraction,
-  runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction,
+  runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, runPostReplyMaintenanceBurst,
   persistIgnoredBotReply, persistPrivateThoughts,
   fetchAccessibleGuildChannel,
   getAmbientRuntime: () => ambientRuntime,
@@ -510,6 +513,17 @@ const ambientRuntime = createAmbientRuntime({
     dryRun,
     dryRuns,
   }) => {
+    if (dryRun !== true) {
+      await runPostReplyMaintenanceBurst({
+        guildConfig,
+        memoryRequest: request,
+        guild,
+        channel,
+        sourceRequestId,
+        source: "ambient_initiative",
+      });
+      return;
+    }
     const latestHuman = latestHumanIdentity(guild.id, channel.id);
     const currentUserId = request.context.memoryFocusUserId ?? latestHuman.userId;
     const currentUsername = resolvePromptUsername(guild, currentUserId) ?? latestHuman.username;

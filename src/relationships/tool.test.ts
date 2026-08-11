@@ -3,6 +3,7 @@ import { createDatabase } from "../db/database";
 import {
   applyRelationshipSignals,
   createRecordRelationshipTool,
+  createReadRelationshipsTool,
   getRelationshipProfile,
   listRelationshipEvents,
   type RelationshipConfig,
@@ -26,6 +27,23 @@ function config(): RelationshipConfig {
 }
 
 describe("record_relationship tool", () => {
+  test("reads complete state only for selected user IDs", async () => {
+    const db = createDatabase(":memory:");
+    await createRecordRelationshipTool({ db, config: config(), scope: { userId: "u1" } }).execute("write", {
+      signals: [{ summary: "Trust increased.", confidence: 1, axes: { trust: 2 }, boundary: "Do not lie." }],
+    });
+    const result = await createReadRelationshipsTool({
+      db,
+      resolveUserLabel: (userId) => `@${userId}`,
+    }).execute("read", { user_ids: ["u1"] });
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+    expect(text).toContain("@u1");
+    expect(text).toContain("trust=2");
+    expect(text).toContain('"Do not lie."');
+    db.close();
+  });
+
   test("records relationship signals", async () => {
     const db = createDatabase(":memory:");
     const tool = createRecordRelationshipTool({ db, config: config(), scope: { userId: "u1" } });

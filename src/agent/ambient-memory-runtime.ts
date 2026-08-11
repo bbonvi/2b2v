@@ -11,7 +11,7 @@ import { type HistoryMessage } from "../agent/history-types";
 import { countMessagesSinceMemoryExtraction, getMemoryExtractionCheckpoint, getMessagesSinceMemoryExtraction, markMemoryExtractionCheckpoint, markMemoryExtractionCheckpointAtMessage } from "../db/memory-extraction-repository";
 import { formatMessageLine, OLDER_LEGEND } from "../agent/history-formatting";
 import { insertDateStamps } from "../agent/history-dates";
-import { buildMemoryContext, buildMemoryMaintenanceContext, buildVisibleUserMemoryContext } from "../agent/memory-context";
+import { buildMemoryContext, buildVisibleUserMemoryContext } from "../agent/memory-context";
 import { createRecordMemoryTool } from "../agent/memory-extraction";
 import { applyRuntimeToolPrompts } from "../agent/runtime-tool-prompts";
 import { commitStagedMaintenanceCalls, type SemanticMaintenanceCoordinator, stageMaintenanceTools, type StagedMaintenanceCall } from "../agent/semantic-maintenance-coordinator.ts";
@@ -35,7 +35,6 @@ export function createAmbientMemoryRuntime(input: {
 ) {
   const { db, client, log, requestLogStore, getGlobalConfig, getPromptBundle, runtimeToolDescription, resolveKnownUsername, resolvePromptUsername, semanticMaintenanceCoordinator } = input;
 const ambientMemoryPasses = new Set<string>();
-const MEMORY_MAINTENANCE_BATCH_SIZE = 12;
 
 function collectHumanUserIds(messages: HistoryMessage[]): string[] {
   const recency = new Map<string, true>();
@@ -130,20 +129,10 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       resolveUserId: (userId) => resolvePromptUsername(guild, userId),
       contextInstruction: getPromptBundle().runtime.contextTemplates.memory,
     });
-    const maintenance = buildMemoryMaintenanceContext({
-      db,
-      guildId,
-      afterId: checkpoint?.maintenanceCursorId ?? 0,
-      limit: MEMORY_MAINTENANCE_BATCH_SIZE,
-      resolveUserId: (userId) => client.users.cache.get(userId)?.username,
-    });
     const context: AssembledContext = {
       sections: [
         ...(currentUserMemories !== ""
           ? [{ label: "Memories", role: "developer" as const, cached: false, text: `## Memory\n${currentUserMemories}` }]
-          : []),
-        ...(maintenance.text !== ""
-          ? [{ label: "Memory Maintenance Candidates", role: "developer" as const, cached: false, text: maintenance.text }]
           : []),
         {
           label: "Chat History — Newer",
@@ -232,7 +221,6 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
           channelId,
           lastMessageId: lastMessage.id,
           lastMessageCreatedAt: lastMessage.timestamp,
-          maintenanceCursorId: maintenance.nextCursorId,
         });
       });
     } catch (err) {

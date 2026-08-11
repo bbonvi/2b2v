@@ -454,6 +454,44 @@ describe("guild resolution and persistence", () => {
     }).innerThreads).toEqual({ enabled: true, modelProfile: "main" });
   });
 
+  test("parses and overrides semantic-maintenance durations per guild", () => {
+    const global = loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "semanticMaintenance:",
+      "  burst:",
+      "    modelProfile: fast",
+      "    quietAfter: 2m",
+      "    maxWait: 4m",
+      "  sweep:",
+      "    modelProfile: fast",
+      "    every: 6h",
+    ].join("\n")));
+    expect(global.defaultSemanticMaintenance.burst).toMatchObject({
+      quietAfterMs: 120_000,
+      maxWaitMs: 240_000,
+      modelProfile: "fast",
+    });
+    expect(global.defaultSemanticMaintenance.sweep).toMatchObject({
+      everyMs: 21_600_000,
+      modelProfile: "fast",
+    });
+    expect(resolveGuildConfig(global, {
+      guildId: "2",
+      slug: "",
+      semanticMaintenance: {
+        burst: { modelProfile: "main", quietAfter: "10m", maxWait: "12m" },
+        sweep: { modelProfile: "main" },
+      },
+    }).semanticMaintenance).toMatchObject({
+      burst: {
+      quietAfterMs: 600_000,
+      maxWaitMs: 720_000,
+        modelProfile: "main",
+      },
+      sweep: { modelProfile: "main" },
+    });
+  });
+
   test("inherits and overrides ambient initiative wall-clock budget", () => {
     const global = loadGlobalConfig(BASE_ENV, writeConfig([
       configText,

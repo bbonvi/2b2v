@@ -433,11 +433,13 @@ export function initialActorToolNames(
     .filter((name) => INITIAL_ACTOR_TOOL_NAMES.has(name) || explicitlyInitialNames.has(name)));
 }
 
-/** Stable maintenance surface: its mutation tool plus capability discovery. */
+/** Stable actor prefix plus private maintenance retrieval and mutation tools. */
 export function initialMaintenanceToolNames(tools: readonly AgentTool[]): Set<string> {
   return new Set(tools
     .map((tool) => tool.name)
-    .filter((name) => name === "load_skill" || name === "search_tools" || name.startsWith("record_")));
+    .filter((name) => INITIAL_ACTOR_TOOL_NAMES.has(name)
+      || name === "read_relationships"
+      || name.startsWith("record_")));
 }
 
 /** Create the actor's compact capability discovery tool. */

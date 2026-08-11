@@ -35,6 +35,15 @@ contextHistory:
 #     maxBatchMessages: 300
 #     minIntervalSeconds: 600
 
+# semanticMaintenance:
+#   burst:
+#     modelProfile: maintenance
+#     quietAfter: 2m
+#     maxWait: 4m
+#   sweep:
+#     modelProfile: maintenance
+#     every: 6h
+
 # Optional per-guild cap for durable memory rows injected into ordinary actor turns
 # memoryContext:
 #   maxRows: 60

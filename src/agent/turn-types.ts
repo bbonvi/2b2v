@@ -121,7 +121,9 @@ export interface SilentMemoryAgentInput {
   userContent: string;
   assistantReply: string;
   visibleReplySent: boolean;
-  passKind?: "post_reply" | "ambient";
+  passKind?: "post_reply" | "ambient" | "sweep";
+  /** Named model execution policy override for a corpus sweep. */
+  modelProfile?: string;
   visibleUserMemoryContext?: string;
   tools: AgentTool[];
   transcript?: OpenRouterMessage[];

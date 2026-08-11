@@ -31,6 +31,49 @@ function tool(name: string, execute: AgentTool["execute"]): AgentTool {
 }
 
 describe("SemanticMaintenanceCoordinator", () => {
+  test("debounces quiet activity and keeps the latest work", async () => {
+    const coordinator = new SemanticMaintenanceCoordinator();
+    const runs: string[] = [];
+    const first = coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 20,
+      maxWaitMs: 100,
+      run: () => { runs.push("first"); return Promise.resolve(); },
+    });
+    await Bun.sleep(5);
+    const second = coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 20,
+      maxWaitMs: 100,
+      run: () => { runs.push("second"); return Promise.resolve(); },
+    });
+
+    await Promise.all([first, second]);
+    expect(runs).toEqual(["second"]);
+  });
+
+  test("caps continuous activity from the first action", async () => {
+    const coordinator = new SemanticMaintenanceCoordinator();
+    const startedAt = Date.now();
+    let ranAt = 0;
+    const first = coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 100,
+      maxWaitMs: 30,
+      run: () => { ranAt = Date.now(); return Promise.resolve(); },
+    });
+    await Bun.sleep(15);
+    const second = coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 100,
+      maxWaitMs: 30,
+      run: () => { ranAt = Date.now(); return Promise.resolve(); },
+    });
+
+    await Promise.all([first, second]);
+    expect(ranAt - startedAt).toBeLessThan(80);
+  });
+
   test("commits in reservation order while inference completes out of order", async () => {
     const coordinator = new SemanticMaintenanceCoordinator();
     const first = coordinator.reserve();

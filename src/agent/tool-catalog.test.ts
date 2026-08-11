@@ -116,14 +116,14 @@ describe("ToolCatalog", () => {
     ]);
   });
 
-  test("keeps only discovery and maintenance mutations initially active", () => {
+  test("keeps the actor prefix and maintenance mutations initially active", () => {
     const tools = [
       tool("search_tools"),
       tool("record_memory"),
       tool("search_memories"),
       tool("fetch_url"),
     ];
-    expect([...initialMaintenanceToolNames(tools)]).toEqual(["search_tools", "record_memory"]);
+    expect([...initialMaintenanceToolNames(tools)]).toEqual(["search_tools", "record_memory", "search_memories"]);
   });
 });
 

@@ -463,6 +463,18 @@ describe("listMemoryMaintenanceBatch", () => {
     expect(next.rows.map((row) => row.id)).toEqual([fourth]);
     const wrapped = listMemoryMaintenanceBatch(db, { guildId: "g1", afterId: next.nextCursorId, limit: 2 });
     expect(wrapped.rows.map((row) => row.id)).toEqual([first, second]);
+    expect(listMemoryMaintenanceBatch(db, {
+      guildId: "g1",
+      afterId: 0,
+      limit: 10,
+      scope: "guild",
+    }).rows.map((row) => row.id)).toEqual([first]);
+    expect(listMemoryMaintenanceBatch(db, {
+      guildId: "g1",
+      afterId: 0,
+      limit: 10,
+      scope: "portable",
+    }).rows.map((row) => row.id)).toEqual([second, fourth]);
   });
 });
 

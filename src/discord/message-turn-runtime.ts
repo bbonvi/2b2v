@@ -79,6 +79,7 @@ export function createMessageTurnRuntime(input: {
     runMemoryPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runMemoryPostReplyExtraction"];
     runRelationshipPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runRelationshipPostReplyExtraction"];
     runInnerThreadPostReplyExtraction: ReturnType<typeof createMaintenanceRuntime>["runInnerThreadPostReplyExtraction"];
+    runPostReplyMaintenanceBurst: ReturnType<typeof createMaintenanceRuntime>["runPostReplyMaintenanceBurst"];
     persistIgnoredBotReply: ReturnType<typeof createTurnRuntime>["persistIgnoredBotReply"];
     persistPrivateThoughts: ReturnType<typeof createTurnRuntime>["persistPrivateThoughts"];
     fetchAccessibleGuildChannel: (channelId: string) => Promise<SendableGuildChannel | null>;
@@ -88,7 +89,7 @@ export function createMessageTurnRuntime(input: {
     preparePersonaModeTurn: (guildId: string) => ReturnType<ReturnType<typeof createPersonaModeRuntime>["prepareNaturalTurn"]>;
   }
 ) {
-  const { db, client, log, requestLogStore, agentJobs, getGuildConfig, getPromptBundle, buildInboundResolvers, authorDisplayName, buildContext, buildAgentTools, createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver, runLoggedAgentTurn, createTtsGenerator, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, persistIgnoredBotReply, persistPrivateThoughts, fetchAccessibleGuildChannel, getAmbientRuntime, getEventWatchRuntime, runtimeContextTemplate, preparePersonaModeTurn } = input;
+  const { db, client, log, requestLogStore, agentJobs, getGuildConfig, getPromptBundle, buildInboundResolvers, authorDisplayName, buildContext, buildAgentTools, createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver, runLoggedAgentTurn, createTtsGenerator, blockToolsExcept, createPostReplyMaintenanceTools, runPostReplyMaintenanceBurst, persistIgnoredBotReply, persistPrivateThoughts, fetchAccessibleGuildChannel, getAmbientRuntime, getEventWatchRuntime, runtimeContextTemplate, preparePersonaModeTurn } = input;
 type CurrentTurnBoundary = NonNullable<Parameters<typeof buildContext>[8]>;
 
 const dispatchers = new Map<string, ChannelDispatcher>();
@@ -841,31 +842,13 @@ async function processTriggeredMessage(
         afterReply: async (memoryRequest) => {
           if (options.actorSurface === "private-life") return;
           if (options.currentTurnOverride !== undefined && options.eventWatchTurn !== undefined) return;
-          await runMemoryPostReplyExtraction({
-            guildConfig,
-            memoryRequest,
-            guild,
-            channel: message.channel,
-            sourceRequestId: requestLog.requestId,
-            currentUserId: message.author.id,
-            currentUsername: message.author.username,
-          });
-          await runRelationshipPostReplyExtraction({
+          await runPostReplyMaintenanceBurst({
             guildConfig,
             memoryRequest,
             guild,
             channel: message.channel,
             sourceRequestId: requestLog.requestId,
             source: "post_reply",
-            currentUserId: message.author.id,
-            currentUsername: message.author.username,
-          });
-          await runInnerThreadPostReplyExtraction({
-            guildConfig,
-            memoryRequest,
-            guild,
-            channel: message.channel,
-            sourceRequestId: requestLog.requestId,
           });
         },
       },

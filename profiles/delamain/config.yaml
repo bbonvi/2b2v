@@ -72,6 +72,20 @@ memoryExtraction:
   ambient:
     enabled: false
 
+semanticMaintenance:
+  burst:
+    enabled: true
+    modelProfile: main
+    quietAfter: 2m
+    maxWait: 4m
+  sweep:
+    enabled: true
+    modelProfile: main
+    every: 6h
+    memories: { maxRows: 300, maxChars: 60000 }
+    relationships: { maxProfiles: 12, maxChars: 60000 }
+    innerThreads: { maxRows: 100, maxChars: 60000 }
+
 ambientAttention:
   enabled: false
 

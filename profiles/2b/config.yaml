@@ -16,6 +16,13 @@ modelProfiles:
         thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
+    maintenanceBurst:
+        provider: openai-codex
+        model: gpt-5.6-terra
+        modelParams: { textVerbosity: low }
+        thinkingLevel: high
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
     imageGeneration:
         provider: openai-codex
         model: gpt-5.6-sol
@@ -250,6 +257,22 @@ memoryExtraction:
 # Maximum selected durable memory rows injected into ordinary actor turns.
 memoryContext:
     maxRows: 80
+
+semanticMaintenance:
+    burst:
+        enabled: true
+        modelProfile: maintenance
+        quietAfter: 2m
+        maxWait: 4m
+        memoryMaxRows: 300
+        memoryMaxChars: 60000
+    sweep:
+        enabled: true
+        modelProfile: maintenance
+        every: 6h
+        memories: { maxRows: 300, maxChars: 60000 }
+        relationships: { maxProfiles: 12, maxChars: 60000 }
+        innerThreads: { maxRows: 100, maxChars: 60000 }
 
 # Non-admin recurring scheduled-task pressure caps.
 schedulePressure:

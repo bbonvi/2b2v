@@ -7,7 +7,7 @@ import { type SendableGuildChannel } from "../discord/message-sender";
 import { runSilentMemoryAgentPass, runSilentToolAgentPass } from "../agent/maintenance-pass";
 import { hasMaintenanceMaterial, type HandlerDeps, type MemoryExtractionRequest } from "../agent/turn-types";
 import { markMemoryExtractionCheckpointAtMessage } from "../db/memory-extraction-repository";
-import { buildVisibleUserMemoryContext } from "../agent/memory-context";
+import { buildMemoryContext, buildVisibleUserMemoryContext } from "../agent/memory-context";
 import { createRecordMemoryTool } from "../agent/memory-extraction";
 import { buildInnerThreadMaintenanceContext, createRecordInnerThreadsTool } from "../agent/inner-thread-service";
 import { applyRuntimeToolPrompts } from "../agent/runtime-tool-prompts";
@@ -16,7 +16,7 @@ import { createSearchToolsTool } from "../agent/tool-catalog.ts";
 import { createPrivateLifeSummaryTool } from "../private-life/summary-tool.ts";
 import { dashboardTriggerLocation } from "../dashboard/management-runtime";
 import { promptLabSyntheticId } from "../dashboard/prompt-lab-runtime";
-import { createRecordRelationshipTool, getRelationshipProfile, listRelationshipEvents, listRelationshipProfiles, renderRelationshipMaintenanceContext, selectRelationshipAnchorProfiles, selectRelationshipContextProfiles, type RelationshipConfig, type RelationshipContextProfile, type RelationshipMutationResult } from "../relationships";
+import { createReadRelationshipsTool, createRecordRelationshipTool, getRelationshipProfile, hasRelationshipData, listRelationshipEvents, listRelationshipProfiles, renderRelationshipMaintenanceContext, selectRelationshipAnchorProfiles, selectRelationshipContextProfiles, type RelationshipConfig, type RelationshipContextProfile, type RelationshipMutationResult } from "../relationships";
 import { type PromptBundle } from "../config/instruction-bundle";
 import type { Database } from "../db/database";
 import { type Client, type Guild } from "discord.js";
@@ -26,6 +26,9 @@ import { clearExpiredPrivateLifeThoughts } from "../db/private-life-repository";
 import { deleteStagedAsset, listStagedAssets } from "../db/staged-asset-repository";
 import { stat } from "fs/promises";
 import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
+import type { SemanticMaintenanceCoordinator } from "./semantic-maintenance-coordinator.ts";
+import { createSemanticMaintenanceBurst } from "./semantic-maintenance-burst.ts";
+import { createSemanticMaintenanceSweep } from "./semantic-maintenance-sweep.ts";
 
 export function createMaintenanceRuntime(input: {
     db: Database;
@@ -42,9 +45,19 @@ export function createMaintenanceRuntime(input: {
     resolveKnownUsername: (guild: Guild, username: string) => string | undefined;
     resolvePromptUsername: (guild: Guild, userId: string) => string | undefined;
     markMemoryExtractionCheckpointFromContext: (input: { guildId: string; channelId: string; contextMessageIds: readonly string[] | undefined; fallbackMessageId?: string; maintenanceCursorId?: number }) => boolean;
+    semanticMaintenanceCoordinator: SemanticMaintenanceCoordinator;
   }
 ) {
-  const { db, client, log, agentJobs, requestLogStore, getGlobalConfig, getPromptBundle, getRelationshipConfig, innerThreadsEnabled, runtimeToolDescription, runtimeContextTemplate, resolveKnownUsername, resolvePromptUsername, markMemoryExtractionCheckpointFromContext } = input;
+  const { db, client, log, agentJobs, requestLogStore, getGlobalConfig, getPromptBundle, getRelationshipConfig, innerThreadsEnabled, runtimeToolDescription, runtimeContextTemplate, resolveKnownUsername, resolvePromptUsername, markMemoryExtractionCheckpointFromContext, semanticMaintenanceCoordinator } = input;
+
+function boundedContext(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const half = Math.max(1, Math.floor((maxChars - 120) / 2));
+  const headEnd = Math.max(1, text.lastIndexOf("\n", half));
+  const tailCandidate = text.indexOf("\n", text.length - half);
+  const tailStart = tailCandidate < 0 ? text.length - half : tailCandidate + 1;
+  return `${text.slice(0, headEnd)}\n\n[Memory context truncated. Use search_memories for omitted rows.]\n\n${text.slice(tailStart)}`;
+}
 function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: string): AgentTool[] {
   const allowedNames = new Set([allowedName]);
   return tools.map((tool) => allowedNames.has(tool.name)
@@ -239,12 +252,16 @@ async function runMemoryPostReplyExtraction(input: {
   channel: unknown;
   sourceRequestId: string;
   source?: string;
-  passKind?: "post_reply" | "ambient";
+  passKind?: "post_reply" | "ambient" | "sweep";
   currentUserId: string;
   currentUsername?: string;
   dryRun?: boolean;
   dryRuns?: Array<{ tool: string; args: unknown }>;
   maintenanceTools?: AgentTool[];
+  burstContext?: boolean;
+  modelProfile?: string;
+  deferCommit?: boolean;
+  memoryContextOverride?: string;
 }): Promise<{ requestId?: string; enabled: boolean; ran: boolean; error?: string }> {
   if (!input.guildConfig.memoryExtraction.postReply || !hasMaintenanceMaterial(input.memoryRequest)) {
     return { enabled: input.guildConfig.memoryExtraction.postReply, ran: false };
@@ -279,14 +296,29 @@ async function runMemoryPostReplyExtraction(input: {
     dryRun: input.dryRun,
     dryRuns: input.dryRuns,
   });
-  const visibleUserMemoryContext = buildVisibleUserMemoryContext({
-    db,
-    guildId,
-    currentUserId: input.memoryRequest.context.memoryFocusUserId ?? input.currentUserId,
-    visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
-    resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
-    contextInstruction: getPromptBundle().runtime.contextTemplates["memory-other-visible-users"],
-  });
+  const visibleUserIds = input.memoryRequest.context.visibleUserIds ?? [];
+  const burstMemoryRows = input.guildConfig.semanticMaintenance.burst.memoryMaxRows;
+  const visibleUserMemoryContext = input.memoryContextOverride ?? (input.burstContext === true
+    ? boundedContext(buildMemoryContext({
+        db,
+        guildId,
+        currentUserId: input.memoryRequest.context.memoryFocusUserId ?? input.currentUserId,
+        visibleUserIds,
+        limit: burstMemoryRows,
+        recentUserMaxUsers: visibleUserIds.length,
+        recentUserMaxMemoriesPerUser: Math.max(20, Math.ceil(burstMemoryRows / (visibleUserIds.length + 2))),
+        recentUserMaxRows: Math.floor(burstMemoryRows / 2),
+        resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
+        contextInstruction: getPromptBundle().runtime.contextTemplates.memory,
+      }), input.guildConfig.semanticMaintenance.burst.memoryMaxChars)
+    : buildVisibleUserMemoryContext({
+        db,
+        guildId,
+        currentUserId: input.memoryRequest.context.memoryFocusUserId ?? input.currentUserId,
+        visibleUserIds,
+        resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
+        contextInstruction: getPromptBundle().runtime.contextTemplates["memory-other-visible-users"],
+      }));
   try {
     const result = await runSilentMemoryAgentPass({
       globalConfig: getGlobalConfig(),
@@ -311,9 +343,13 @@ async function runMemoryPostReplyExtraction(input: {
       promptContext: input.memoryRequest.promptContext,
       requestLog: memoryLog,
       log: log.child({ guildId, channelId, requestId: memoryLog.requestId, component: "memory-pass" }),
+      ...(input.modelProfile === undefined ? {} : { modelProfile: input.modelProfile }),
     });
+    if (result.text.trim() !== "") {
+      log.warn("silent memory pass produced discarded visible output", { guildId, channelId });
+    }
     continueMaintenance(input.memoryRequest, result);
-    if (input.dryRun !== true) {
+    if (input.dryRun !== true && input.deferCommit !== true) {
       const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
         guildId,
         channelId,
@@ -355,6 +391,9 @@ async function runRelationshipPostReplyExtraction(input: {
   onResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
   maintenanceTools?: AgentTool[];
   additionalDecisionInstruction?: string;
+  retrievalFirst?: boolean;
+  relationshipStateOverride?: string;
+  modelProfile?: string;
 }): Promise<void> {
   const config = getRelationshipConfig(input.guildConfig);
   if (!config.enabled || !hasMaintenanceMaterial(input.memoryRequest)) return;
@@ -410,37 +449,57 @@ async function runRelationshipPostReplyExtraction(input: {
       const username = input.guild?.members.cache.get(userId)?.user.username;
       return username === undefined ? userId : `@${username} (${userId})`;
     };
-    const selected = selectRelationshipContextProfiles({
-      currentUserId: input.currentUserId,
-      anchors: selectRelationshipAnchorProfiles(listRelationshipProfiles(db, 500)).map(
-        (profile): RelationshipContextProfile => ({
-          profile,
-          label: relationshipLabel(profile.userId),
-          reason: "anchor",
-        }),
-      ),
-      recent: (input.memoryRequest.context.visibleUserIds ?? []).map(
-        (userId): RelationshipContextProfile => ({
-          profile: getRelationshipProfile(db, userId),
-          label: relationshipLabel(userId),
-          reason: "recent-chat",
-        }),
-      ),
-    });
-    const relationshipState = renderRelationshipMaintenanceContext({
-      current: {
-        profile: getRelationshipProfile(db, input.currentUserId),
-        label: relationshipLabel(input.currentUserId),
-        events: listRelationshipEvents(db, { userId: input.currentUserId, limit: 30 }),
-      },
-      others: [...selected.anchors, ...selected.recent],
+    const participantIds = [...new Set([
+      input.currentUserId,
+      ...(input.memoryRequest.context.visibleUserIds ?? []),
+    ])].filter((userId) => userId !== "");
+    const relationshipState = input.relationshipStateOverride ?? (input.retrievalFirst === true
+      ? [
+          "## Relationship Profile Index",
+          "Read a complete profile only when the current evidence may change it.",
+          ...participantIds.map((userId) => {
+            const profile = getRelationshipProfile(db, userId);
+            return `- ${relationshipLabel(userId)} — ${hasRelationshipData(profile) ? "stored state exists" : "no stored state"}`;
+          }),
+        ].join("\n")
+      : (() => {
+          const selected = selectRelationshipContextProfiles({
+            currentUserId: input.currentUserId,
+            anchors: selectRelationshipAnchorProfiles(listRelationshipProfiles(db, 500)).map(
+              (profile): RelationshipContextProfile => ({
+                profile,
+                label: relationshipLabel(profile.userId),
+                reason: "anchor",
+              }),
+            ),
+            recent: (input.memoryRequest.context.visibleUserIds ?? []).map(
+              (userId): RelationshipContextProfile => ({
+                profile: getRelationshipProfile(db, userId),
+                label: relationshipLabel(userId),
+                reason: "recent-chat",
+              }),
+            ),
+          });
+          return renderRelationshipMaintenanceContext({
+            current: {
+              profile: getRelationshipProfile(db, input.currentUserId),
+              label: relationshipLabel(input.currentUserId),
+              events: listRelationshipEvents(db, { userId: input.currentUserId, limit: 30 }),
+            },
+            others: [...selected.anchors, ...selected.recent],
+          });
+        })());
+    const readRelationshipsTool = createReadRelationshipsTool({
+      db,
+      resolveUserLabel: relationshipLabel,
+      description: runtimeToolDescription("read_relationships"),
     });
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
       { maxToolCalls: config.maxToolCalls },
       [
         "## Execution Mode: Relationship Maintenance",
-        "Private relationship maintenance is active. Read-only tools are optionally available when they would materially reduce uncertainty; record_relationship is the only state-changing tool available, and relevant relationship state is already supplied.",
+        "Private relationship maintenance is active. Read-only tools are available when they reduce material uncertainty; record_relationship is the only state-changing tool available.",
         "Submit every useful relationship signal as one complete record_relationship signal list. Retry only if the tool reports an error, and retry only rejected signals.",
       ].join("\n"),
     );
@@ -455,7 +514,7 @@ async function runRelationshipPostReplyExtraction(input: {
       userContent: input.memoryRequest.userMessage,
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
-      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_relationship", "silent relationships pass"),
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, [...maintenanceTools, readRelationshipsTool], "record_relationship", "silent relationships pass"),
       runtimeInstruction: getPromptBundle().runtime.reply,
       controlMessage: [
         executionMode,
@@ -468,7 +527,7 @@ async function runRelationshipPostReplyExtraction(input: {
         ),
         input.additionalDecisionInstruction ?? "",
       ].filter((part) => part !== "").join("\n\n"),
-      modelProfile: config.modelProfile,
+      modelProfile: input.modelProfile ?? config.modelProfile,
       maxToolCalls: config.maxToolCalls,
       terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
       transcript: input.memoryRequest.maintenanceTranscript,
@@ -476,6 +535,9 @@ async function runRelationshipPostReplyExtraction(input: {
       requestLog: relationshipsLog,
       log: log.child({ guildId, channelId, requestId: relationshipsLog.requestId, component: "relationships-pass" }),
     });
+    if (result.text.trim() !== "") {
+      log.warn("silent relationships pass produced discarded visible output", { guildId, channelId });
+    }
     continueMaintenance(input.memoryRequest, result);
   } catch (err) {
     relationshipsLog.setError(err instanceof Error ? err.message : String(err));
@@ -496,6 +558,9 @@ async function runInnerThreadPostReplyExtraction(input: {
   sourceRequestId: string;
   dryRun?: boolean;
   maintenanceTools?: AgentTool[];
+  retrievalFirst?: boolean;
+  maintenanceContextOverride?: string;
+  modelProfile?: string;
 }): Promise<void> {
   if (!innerThreadsEnabled(input.guildConfig) || !hasMaintenanceMaterial(input.memoryRequest)) return;
   const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
@@ -527,16 +592,21 @@ async function runInnerThreadPostReplyExtraction(input: {
     sourceRequestId: input.sourceRequestId,
     dryRun: input.dryRun,
   });
-  const maintenanceContext = buildInnerThreadMaintenanceContext({
-    db,
-    guildId,
-    visibleUserIds: [
-      input.memoryRequest.incomingMessage.authorId,
-      ...(input.memoryRequest.context.visibleUserIds ?? []),
-    ],
-    resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
-    resolveGuildId: (otherGuildId) => client.guilds.cache.get(otherGuildId)?.name,
-  });
+  const maintenanceContext = input.maintenanceContextOverride ?? (input.retrievalFirst === true
+    ? [
+        "## Inner-Thread Retrieval",
+        "Use list_inner_threads only when the current evidence may create, update, resolve, or duplicate an inner thread.",
+      ].join("\n")
+    : buildInnerThreadMaintenanceContext({
+        db,
+        guildId,
+        visibleUserIds: [
+          input.memoryRequest.incomingMessage.authorId,
+          ...(input.memoryRequest.context.visibleUserIds ?? []),
+        ],
+        resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
+        resolveGuildId: (otherGuildId) => client.guilds.cache.get(otherGuildId)?.name,
+      }));
   try {
     const result = await runSilentToolAgentPass({
       globalConfig: getGlobalConfig(),
@@ -569,7 +639,7 @@ async function runInnerThreadPostReplyExtraction(input: {
           "Decide silently whether durable inner threads should change.",
         ),
       ].filter((part) => part !== "").join("\n\n"),
-      modelProfile: input.guildConfig.innerThreads?.modelProfile ?? input.guildConfig.modelProfile,
+      modelProfile: input.modelProfile ?? input.guildConfig.innerThreads?.modelProfile ?? input.guildConfig.modelProfile,
       maxToolCalls: 3,
       terminateAfterSuccessfulToolRoundNames: ["record_inner_threads"],
       transcript: input.memoryRequest.maintenanceTranscript,
@@ -577,6 +647,9 @@ async function runInnerThreadPostReplyExtraction(input: {
       requestLog,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId, component: "inner-thread-pass" }),
     });
+    if (result.text.trim() !== "") {
+      log.warn("silent inner-thread pass produced discarded visible output", { guildId, channelId });
+    }
     continueMaintenance(input.memoryRequest, result);
   } catch (error) {
     requestLog.setError(error instanceof Error ? error.message : String(error));
@@ -586,6 +659,31 @@ async function runInnerThreadPostReplyExtraction(input: {
     requestLogStore.decrementActive();
   }
 }
+
+const runSemanticMaintenanceSweep = createSemanticMaintenanceSweep({
+  db,
+  client,
+  coordinator: semanticMaintenanceCoordinator,
+  profileId: () => getGlobalConfig().runtimeProfileId ?? "default",
+  resolvePromptUsername,
+  createTools: createPostReplyMaintenanceTools,
+  runMemoryPass: runMemoryPostReplyExtraction,
+  runRelationshipPass: runRelationshipPostReplyExtraction,
+  runInnerThreadPass: runInnerThreadPostReplyExtraction,
+});
+
+const runPostReplyMaintenanceBurst = createSemanticMaintenanceBurst({
+  db,
+  client,
+  coordinator: semanticMaintenanceCoordinator,
+  resolvePromptUsername,
+  markCheckpointFromContext: markMemoryExtractionCheckpointFromContext,
+  createTools: createPostReplyMaintenanceTools,
+  runMemoryPass: runMemoryPostReplyExtraction,
+  runRelationshipPass: runRelationshipPostReplyExtraction,
+  runInnerThreadPass: runInnerThreadPostReplyExtraction,
+  runSweep: runSemanticMaintenanceSweep,
+});
 
 async function runPrivateLifeMaintenance(input: {
   episodeId: string;
@@ -800,5 +898,5 @@ async function cleanStagedAssets(): Promise<void> {
 }
 
 
-  return { blockToolsExcept, toolsForMaintenancePass, latestHumanIdentity, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, runPrivateLifeMaintenance, createPrivateLifeMaintenanceTools, startCleanup };
+  return { blockToolsExcept, toolsForMaintenancePass, latestHumanIdentity, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, runPostReplyMaintenanceBurst, runPrivateLifeMaintenance, createPrivateLifeMaintenanceTools, startCleanup };
 }

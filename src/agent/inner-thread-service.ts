@@ -497,3 +497,23 @@ export function buildInnerThreadMaintenanceContext(input: {
       : ["### Recent", ...recent.map((thread) => renderThread(thread, context))]),
   ].join("\n");
 }
+
+/** Render a bounded stored-thread corpus for infrequent semantic cleanup. */
+export function buildInnerThreadSweepContext(input: {
+  threads: readonly InnerThread[];
+  currentGuildId: string;
+  resolveUserId?: (userId: string) => string | undefined;
+  resolveGuildId?: (guildId: string) => string | undefined;
+}): string {
+  if (input.threads.length === 0) return "";
+  const context: ThreadRenderContext = {
+    currentGuildId: input.currentGuildId,
+    ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
+    ...(input.resolveGuildId !== undefined ? { resolveGuildId: input.resolveGuildId } : {}),
+  };
+  return [
+    "## Long-Term Inner-Thread Candidates",
+    "Review for clear consolidation, scope repair, resolution, or deletion. Age alone is not a reason to change a thread. Use message tools only for targeted uncertainty.",
+    ...input.threads.map((thread) => renderThread(thread, context)),
+  ].join("\n");
+}

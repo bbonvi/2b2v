@@ -68,6 +68,7 @@ describe("repository profile layout", () => {
             "manage_notebook",
             "patch_notebook",
             "read_notebook",
+            "read_relationships",
             "search_notebook",
           ]
         : [];
