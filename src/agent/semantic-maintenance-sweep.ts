@@ -4,6 +4,7 @@ import type { GuildConfig } from "../config/types.ts";
 import type { Database } from "../db/database.ts";
 import { listInnerThreads, type InnerThread } from "../db/inner-thread-repository.ts";
 import { insertPromptOnlyBotMessage } from "../db/message-state-repository.ts";
+import { getSemanticMaintenanceSweepState, setSemanticMaintenanceSweepState, type SemanticMaintenanceSweepState } from "../db/semantic-maintenance-repository.ts";
 import { buildMemoryMaintenanceContext } from "./memory-context.ts";
 import { buildInnerThreadSweepContext } from "./inner-thread-service.ts";
 import { listRelationshipEvents, listRelationshipProfiles, renderRelationshipSweepContext } from "../relationships/index.ts";
@@ -17,13 +18,6 @@ interface SweepTrigger {
   channel: unknown;
   sourceRequestId: string;
   source?: string;
-}
-
-interface SweepCursor {
-  lastAt: number;
-  memoryId: number;
-  relationshipOffset: number;
-  threadOffset: number;
 }
 
 function bounded(text: string, maxChars: number): string {
@@ -80,24 +74,33 @@ export function createSemanticMaintenanceSweep(input: {
     relationshipStateOverride: string;
     modelProfile: string;
   }) => Promise<void>;
-  runInnerThreadPass: (input: Omit<SweepTrigger, "source"> & {
+  runInnerThreadPass: (input: SweepTrigger & {
     maintenanceTools: AgentTool[];
     maintenanceContextOverride: string;
     modelProfile: string;
   }) => Promise<void>;
 }): (trigger: SweepTrigger) => Promise<void> {
-  const profileCursors = new Map<string, SweepCursor>();
-  const guildCursors = new Map<string, SweepCursor>();
-  const emptyCursor = (): SweepCursor => ({ lastAt: 0, memoryId: 0, relationshipOffset: 0, threadOffset: 0 });
+  const initialState = (): SemanticMaintenanceSweepState => ({
+    lastAt: 0,
+    memoryId: 0,
+    relationshipOffset: 0,
+    threadOffset: 0,
+  });
 
-  return async (trigger): Promise<void> => {
+  const run = async (trigger: SweepTrigger): Promise<void> => {
     const config = trigger.guildConfig.semanticMaintenance.sweep;
     if (!config.enabled) return;
     const now = Date.now();
     const profileKey = input.profileId();
     const guildKey = `${profileKey}:${trigger.guild.id}`;
-    const profile = profileCursors.get(profileKey) ?? emptyCursor();
-    const guild = guildCursors.get(guildKey) ?? emptyCursor();
+    const profileScopeKey = `profile:${profileKey}`;
+    const guildScopeKey = `guild:${guildKey}`;
+    const storedProfile = getSemanticMaintenanceSweepState(input.db, profileScopeKey);
+    const storedGuild = getSemanticMaintenanceSweepState(input.db, guildScopeKey);
+    const profile = storedProfile ?? initialState();
+    const guild = storedGuild ?? initialState();
+    if (storedProfile === null) setSemanticMaintenanceSweepState(input.db, profileScopeKey, profile);
+    if (storedGuild === null) setSemanticMaintenanceSweepState(input.db, guildScopeKey, guild);
     const profileDue = now - profile.lastAt >= config.everyMs;
     const guildDue = now - guild.lastAt >= config.everyMs;
     if (!profileDue && !guildDue) return;
@@ -220,6 +223,7 @@ export function createSemanticMaintenanceSweep(input: {
           guild: trigger.guild,
           channel: trigger.channel,
           sourceRequestId: trigger.sourceRequestId,
+          source: trigger.source,
           maintenanceTools: stagedTools,
           maintenanceContextOverride: threadContext,
           modelProfile: config.modelProfile,
@@ -248,7 +252,7 @@ export function createSemanticMaintenanceSweep(input: {
         }
       });
       if (profileDue) {
-        profileCursors.set(profileKey, {
+        setSemanticMaintenanceSweepState(input.db, profileScopeKey, {
           lastAt: now,
           memoryId: profileMemory.nextCursorId,
           relationshipOffset: relationships.nextOffset,
@@ -256,7 +260,7 @@ export function createSemanticMaintenanceSweep(input: {
         });
       }
       if (guildDue && (guildLimit > 0 || threadGuildLimit > 0)) {
-        guildCursors.set(guildKey, {
+        setSemanticMaintenanceSweepState(input.db, guildScopeKey, {
           lastAt: now,
           memoryId: guildMemory.nextCursorId,
           relationshipOffset: guild.relationshipOffset,
@@ -267,5 +271,12 @@ export function createSemanticMaintenanceSweep(input: {
       ticket.skip();
       throw error;
     }
+  };
+
+  let tail = Promise.resolve();
+  return (trigger): Promise<void> => {
+    const result = tail.then(async () => await run(trigger));
+    tail = result.catch(() => undefined);
+    return result;
   };
 }

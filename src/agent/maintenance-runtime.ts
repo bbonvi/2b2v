@@ -556,6 +556,7 @@ async function runInnerThreadPostReplyExtraction(input: {
   guild: Guild;
   channel: unknown;
   sourceRequestId: string;
+  source?: string;
   dryRun?: boolean;
   maintenanceTools?: AgentTool[];
   retrievalFirst?: boolean;
@@ -571,6 +572,7 @@ async function runInnerThreadPostReplyExtraction(input: {
   requestLog.setTrigger({
     type: "inner_thread_maintenance",
     sourceRequestId: input.sourceRequestId,
+    ...(input.source !== undefined ? { source: input.source } : {}),
     ...(input.dryRun === true ? { dryRun: true } : {}),
   });
   requestLog.setTriggerContext({

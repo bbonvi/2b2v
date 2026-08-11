@@ -35,7 +35,7 @@ type RelationshipPass = (input: BurstInput & {
   modelProfile: string;
 }) => Promise<void>;
 
-type InnerThreadPass = (input: Omit<BurstInput, "source"> & {
+type InnerThreadPass = (input: BurstInput & {
   maintenanceTools: AgentTool[];
   retrievalFirst: true;
   modelProfile: string;
@@ -141,6 +141,7 @@ export function createSemanticMaintenanceBurst(input: {
         guild: burst.guild,
         channel: burst.channel,
         sourceRequestId: burst.sourceRequestId,
+        source: burst.source,
         maintenanceTools: stagedTools,
         retrievalFirst: true,
         modelProfile: burst.guildConfig.semanticMaintenance.burst.modelProfile,
@@ -175,7 +176,12 @@ export function createSemanticMaintenanceBurst(input: {
           });
         }
       });
-      await input.runSweep?.({ ...burst, memoryRequest: request });
+      const { promptContext: _actorPromptContext, ...actorRequest } = burst.memoryRequest;
+      await input.runSweep?.({
+        ...burst,
+        source: "sweep",
+        memoryRequest: { ...actorRequest, context: request.context },
+      });
     } catch (error) {
       ticket.skip();
       throw error;

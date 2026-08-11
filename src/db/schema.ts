@@ -317,6 +317,14 @@ export const SCHEMA_SQL = `
     PRIMARY KEY (guild_id, channel_id)
   );
 
+  CREATE TABLE IF NOT EXISTS semantic_maintenance_sweep_state (
+    scope_key            TEXT PRIMARY KEY,
+    last_at              INTEGER NOT NULL CHECK(last_at >= 0),
+    memory_cursor_id     INTEGER NOT NULL CHECK(memory_cursor_id >= 0),
+    relationship_offset  INTEGER NOT NULL CHECK(relationship_offset >= 0),
+    thread_offset        INTEGER NOT NULL CHECK(thread_offset >= 0)
+  );
+
   CREATE TABLE IF NOT EXISTS relationship_profiles (
     user_id          TEXT PRIMARY KEY,
     axes_json        TEXT NOT NULL,
