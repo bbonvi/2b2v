@@ -11,12 +11,12 @@ modelProfiles:
     codexTransport: websocket-cached
     promptCaching: { enabled: true }
   imageGeneration:
-      provider: openai-codex
-      model: gpt-5.6-terra
-      modelParams: {}
-      thinkingLevel: medium
-      codexTransport: websocket-cached
-      promptCaching: { enabled: true }
+    provider: openai-codex
+    model: gpt-5.6-terra
+    modelParams: {}
+    thinkingLevel: medium
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
   evaluator:
     provider: openai-codex
     model: gpt-5.6-luna
