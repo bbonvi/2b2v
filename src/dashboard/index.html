@@ -3051,9 +3051,11 @@
     const data = body.groups || [];
     const totals = body.totals || {};
 
-    const cost = totals.estimatedCostUsd == null ? '$0.0000' : '$' + Number(totals.estimatedCostUsd).toFixed(4);
+    const costs = '24h $' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(4)
+      + ' · 7d $' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(4)
+      + ' · 31d $' + Number(totals.estimatedCostLast31DaysUsd || 0).toFixed(4);
     const since = totals.firstRecordedAt == null ? '' : ' · since ' + fmtLogStart(totals.firstRecordedAt);
-    logCount.textContent = cost + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
+    logCount.textContent = costs + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
       + (totals.groupCount || 0) + ' message lifecycles' + since;
     if (data.length === 0) {
       rowNodes.clear();

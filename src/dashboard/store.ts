@@ -68,6 +68,9 @@ export interface RequestLogTotals {
   requestCount: number;
   groupCount: number;
   estimatedCostUsd: number | null;
+  estimatedCostLast24HoursUsd: number;
+  estimatedCostLast7DaysUsd: number;
+  estimatedCostLast31DaysUsd: number;
   firstRecordedAt: string | null;
 }
 
@@ -381,16 +384,24 @@ export class RequestLogStore {
 
   private queryTotals(filters: RequestLogFilters): RequestLogTotals {
     const filter = requestLogFilterQuery(filters);
+    const now = Date.now();
+    const costCutoffs = [1, 7, 31].map((days) => new Date(now - days * 86_400_000).toISOString());
     const row = this.db.prepare(`SELECT COUNT(*) AS request_count,
         COUNT(DISTINCT group_id) AS group_count,
         COUNT(estimated_cost_usd) AS cost_count,
         SUM(estimated_cost_usd) AS estimated_cost_usd,
+        COALESCE(SUM(CASE WHEN timestamp >= ? THEN estimated_cost_usd ELSE 0 END), 0) AS cost_last_24_hours,
+        COALESCE(SUM(CASE WHEN timestamp >= ? THEN estimated_cost_usd ELSE 0 END), 0) AS cost_last_7_days,
+        COALESCE(SUM(CASE WHEN timestamp >= ? THEN estimated_cost_usd ELSE 0 END), 0) AS cost_last_31_days,
         MIN(timestamp) AS first_recorded_at
-      FROM request_logs${filter.where}`).get(...filter.params) as {
+      FROM request_logs${filter.where}`).get(...costCutoffs, ...filter.params) as {
         request_count: number;
         group_count: number;
         cost_count: number;
         estimated_cost_usd: number | null;
+        cost_last_24_hours: number;
+        cost_last_7_days: number;
+        cost_last_31_days: number;
         first_recorded_at: string | null;
       };
     const active = this.matchingActiveSummaries(filters);
@@ -407,6 +418,9 @@ export class RequestLogStore {
     const activeCosts = active.flatMap((item) => item.summary.estimatedCostUsd === null
       ? []
       : [item.summary.estimatedCostUsd]);
+    const activeRollingCosts = costCutoffs.map((cutoff) => active.reduce((total, item) => (
+      item.summary.timestamp >= cutoff ? total + (item.summary.estimatedCostUsd ?? 0) : total
+    ), 0));
     const firstRecordedAt = active.reduce<string | null>((first, item) => (
       first === null || item.summary.timestamp < first ? item.summary.timestamp : first
     ), row.first_recorded_at);
@@ -416,6 +430,9 @@ export class RequestLogStore {
       estimatedCostUsd: row.cost_count + activeCosts.length === 0
         ? null
         : (row.estimated_cost_usd ?? 0) + activeCosts.reduce((total, cost) => total + cost, 0),
+      estimatedCostLast24HoursUsd: row.cost_last_24_hours + (activeRollingCosts[0] ?? 0),
+      estimatedCostLast7DaysUsd: row.cost_last_7_days + (activeRollingCosts[1] ?? 0),
+      estimatedCostLast31DaysUsd: row.cost_last_31_days + (activeRollingCosts[2] ?? 0),
       firstRecordedAt,
     };
   }

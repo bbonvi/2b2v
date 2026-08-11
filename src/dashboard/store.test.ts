@@ -117,7 +117,34 @@ describe("RequestLogStore", () => {
     expect(page.totals.requestCount).toBe(120);
     expect(page.totals.groupCount).toBe(120);
     expect(page.totals.estimatedCostUsd).toBeCloseTo(1.2);
+    expect(page.totals.estimatedCostLast24HoursUsd).toBe(0);
+    expect(page.totals.estimatedCostLast7DaysUsd).toBe(0);
+    expect(page.totals.estimatedCostLast31DaysUsd).toBe(0);
     expect(page.totals.firstRecordedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("totals include rolling estimated costs", () => {
+    const store = new RequestLogStore();
+    const now = Date.now();
+    for (const [daysAgo, cost] of [[0.5, 1], [3, 2], [20, 4], [40, 8]] as const) {
+      store.push(makeEntry({
+        timestamp: new Date(now - daysAgo * 86_400_000).toISOString(),
+        llmCalls: [{
+          model: "model",
+          promptTokens: 1,
+          completionTokens: 1,
+          totalTokens: 2,
+          estimatedCostUsd: cost,
+          stopReason: "stop",
+          contentTypes: ["text"],
+        }],
+      }));
+    }
+
+    const totals = store.queryGroupPage().totals;
+    expect(totals.estimatedCostLast24HoursUsd).toBe(1);
+    expect(totals.estimatedCostLast7DaysUsd).toBe(3);
+    expect(totals.estimatedCostLast31DaysUsd).toBe(7);
   });
 
   test("query sorts by request timestamp, not emit order", () => {
