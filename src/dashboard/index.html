@@ -3051,9 +3051,9 @@
     const data = body.groups || [];
     const totals = body.totals || {};
 
-    const costs = '<span class="entry-cost">24h $' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(2) + '</span>'
-      + ' · <span class="entry-cost">7d $' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(2) + '</span>'
-      + ' · <span class="entry-cost">31d $' + Number(totals.estimatedCostLast31DaysUsd || 0).toFixed(2) + '</span>';
+    const costs = '24h <span class="entry-cost">$' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(2) + '</span>'
+      + ' · 7d <span class="entry-cost">$' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(2) + '</span>'
+      + ' · 31d <span class="entry-cost">$' + Number(totals.estimatedCostLast31DaysUsd || 0).toFixed(2) + '</span>';
     const since = totals.firstRecordedAt == null ? '' : ' · since ' + fmtLogStart(totals.firstRecordedAt);
     logCount.innerHTML = costs + ' estimated · ' + (totals.requestCount || 0) + ' requests · '
       + (totals.groupCount || 0) + ' message lifecycles' + esc(since);
