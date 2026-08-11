@@ -176,10 +176,7 @@ function isPrivateHistoryRow(message: HistoryMessage): boolean {
 }
 
 function formatPrivateHistoryRow(message: HistoryMessage): string {
-  const content = message.id.startsWith(`${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}source:`)
-    ? "<handoff>...</handoff>"
-    : formatHistoryContent(message);
-  return `[@${message.author}]: ${content}`;
+  return `[@${message.author}]: ${formatHistoryContent(message)}`;
 }
 
 function attachPrivateRows(

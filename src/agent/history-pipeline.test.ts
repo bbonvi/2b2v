@@ -492,7 +492,7 @@ describe("processHistory", () => {
     expect(thoughtIndex).toBeLessThan(secondReplyIndex);
   });
 
-  test("masks source handoffs and keeps destination handoffs in linked history", async () => {
+  test("keeps full source and destination handoffs in linked history", async () => {
     const config = {
       ...defaultConfig,
       contextHistory: {
@@ -547,11 +547,10 @@ describe("processHistory", () => {
       deps,
     );
 
-    expect(result.olderText).toContain("[@2B]: <handoff>...</handoff>");
-    expect(result.olderText).not.toContain("Older line keeps");
+    expect(result.olderText).toContain(`[@2B]: ${olderHandoff.content}`);
     expect(result.olderText).not.toContain("[trimmed");
     expect(result.olderText.indexOf("content-0")).toBeLessThan(
-      result.olderText.indexOf("<handoff>...</handoff>"),
+      result.olderText.indexOf(olderHandoff.content),
     );
     expect(result.newerText).toContain(`[@2B]: ${newerHandoff.content}`);
     expect(result.newerText.indexOf("content-3")).toBeLessThan(
