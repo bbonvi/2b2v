@@ -41,7 +41,6 @@ describe("semantic maintenance burst", () => {
     const seenSections: string[][] = [];
     const seenProfiles: string[] = [];
     let sweepRequest: MemoryExtractionRequest | undefined;
-    let sweepSource: string | undefined;
     const coordinator = new SemanticMaintenanceCoordinator();
     const guildConfig = makeGuildConfig({
       guildId: "g1",
@@ -119,7 +118,6 @@ describe("semantic maintenance burst", () => {
       },
       runSweep: (input) => {
         sweepRequest = input.memoryRequest;
-        sweepSource = input.source;
         return Promise.resolve();
       },
     });
@@ -138,9 +136,8 @@ describe("semantic maintenance burst", () => {
       ["Chat History — Newer"],
     ]);
     expect(seenProfiles).toEqual(["burst-profile", "burst-profile", "burst-profile"]);
+    expect(sweepRequest).toBe(request);
     expect(sweepRequest?.maintenanceTranscript).toEqual([{ role: "assistant", content: "actor evidence" }]);
-    expect(sweepRequest?.promptContext).toBeUndefined();
-    expect(sweepSource).toBe("sweep");
     expect(mutations).toHaveLength(3);
     const receipt = db.raw.prepare("SELECT translated_content FROM messages WHERE id = 'prompt-only:maintenance:m1'")
       .get() as { translated_content: string } | null;

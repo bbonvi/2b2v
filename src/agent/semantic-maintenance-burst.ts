@@ -77,7 +77,7 @@ export function createSemanticMaintenanceBurst(input: {
   runMemoryPass: MemoryPass;
   runRelationshipPass: RelationshipPass;
   runInnerThreadPass: InnerThreadPass;
-  runSweep?: (burst: BurstInput & { memoryRequest: MemoryExtractionRequest }) => Promise<void>;
+  runSweep?: (burst: BurstInput) => Promise<void>;
 }): (burst: BurstInput) => Promise<void> {
   const runNow = async (burst: BurstInput): Promise<void> => {
     if (!hasMaintenanceMaterial(burst.memoryRequest)) return;
@@ -176,12 +176,7 @@ export function createSemanticMaintenanceBurst(input: {
           });
         }
       });
-      const { promptContext: _actorPromptContext, ...actorRequest } = burst.memoryRequest;
-      await input.runSweep?.({
-        ...burst,
-        source: "sweep",
-        memoryRequest: { ...actorRequest, context: request.context },
-      });
+      await input.runSweep?.(burst);
     } catch (error) {
       ticket.skip();
       throw error;

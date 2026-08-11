@@ -29,6 +29,10 @@ import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
 import type { SemanticMaintenanceCoordinator } from "./semantic-maintenance-coordinator.ts";
 import { createSemanticMaintenanceBurst } from "./semantic-maintenance-burst.ts";
 import { createSemanticMaintenanceSweep } from "./semantic-maintenance-sweep.ts";
+import type { createContextRuntime } from "./context-runtime.ts";
+import { listChannelMessages } from "../db/message-history-repository.ts";
+import { createDiscordReplyFallbackDeps } from "../discord/reply-fallback-runtime.ts";
+import type { HistoryMessage } from "./history-types.ts";
 
 export function createMaintenanceRuntime(input: {
     db: Database;
@@ -46,9 +50,10 @@ export function createMaintenanceRuntime(input: {
     resolvePromptUsername: (guild: Guild, userId: string) => string | undefined;
     markMemoryExtractionCheckpointFromContext: (input: { guildId: string; channelId: string; contextMessageIds: readonly string[] | undefined; fallbackMessageId?: string; maintenanceCursorId?: number }) => boolean;
     semanticMaintenanceCoordinator: SemanticMaintenanceCoordinator;
+    buildContext: ReturnType<typeof createContextRuntime>["buildContext"];
   }
 ) {
-  const { db, client, log, agentJobs, requestLogStore, getGlobalConfig, getPromptBundle, getRelationshipConfig, innerThreadsEnabled, runtimeToolDescription, runtimeContextTemplate, resolveKnownUsername, resolvePromptUsername, markMemoryExtractionCheckpointFromContext, semanticMaintenanceCoordinator } = input;
+  const { db, client, log, agentJobs, requestLogStore, getGlobalConfig, getPromptBundle, getRelationshipConfig, innerThreadsEnabled, runtimeToolDescription, runtimeContextTemplate, resolveKnownUsername, resolvePromptUsername, markMemoryExtractionCheckpointFromContext, semanticMaintenanceCoordinator, buildContext } = input;
 
 function boundedContext(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
@@ -668,6 +673,53 @@ const runSemanticMaintenanceSweep = createSemanticMaintenanceSweep({
   coordinator: semanticMaintenanceCoordinator,
   profileId: () => getGlobalConfig().runtimeProfileId ?? "default",
   resolvePromptUsername,
+  buildContext: async (trigger) => {
+    const guildId = trigger.guild.id;
+    const channelId = trigger.memoryRequest.incomingMessage.channelId;
+    if (channelId === undefined || channelId === "") {
+      throw new Error("Semantic maintenance sweep requires a channel ID.");
+    }
+    const latest = listChannelMessages(db, guildId, channelId, { limit: 1 })?.[0];
+    const anchor: HistoryMessage = latest ?? {
+      id: trigger.memoryRequest.sourceMessageId ?? `maintenance-sweep-${Date.now()}`,
+      author: trigger.memoryRequest.incomingMessage.authorUsername,
+      authorDisplayName: trigger.memoryRequest.incomingMessage.authorDisplayName,
+      authorId: trigger.memoryRequest.incomingMessage.authorId,
+      content: trigger.memoryRequest.userMessage,
+      isBot: trigger.memoryRequest.incomingMessage.authorIsBot === true,
+      timestamp: Date.now(),
+      replyToId: trigger.memoryRequest.incomingMessage.replyToMessageId ?? null,
+      hasEmbeds: false,
+      isSynthetic: true,
+      relatedThreadId: null,
+    };
+    return await buildContext(
+      guildId,
+      channelId,
+      trigger.guild,
+      trigger.guildConfig,
+      anchor.content,
+      anchor,
+      createDiscordReplyFallbackDeps({
+        db,
+        clientChannelsFetch: async (id) => await client.channels.fetch(id),
+        guild: trigger.guild,
+        guildId,
+        channelId,
+        guildConfig: trigger.guildConfig,
+      }),
+      trigger.guild.channels.cache.get(channelId)?.isThread() ?? false,
+      undefined,
+      "live",
+      undefined,
+      {
+        appendLatestToHistory: false,
+        ...(trigger.memoryRequest.context.memoryFocusUserId === undefined
+          ? {}
+          : { memoryFocusUserId: trigger.memoryRequest.context.memoryFocusUserId }),
+      },
+    );
+  },
   createTools: createPostReplyMaintenanceTools,
   runMemoryPass: runMemoryPostReplyExtraction,
   runRelationshipPass: runRelationshipPostReplyExtraction,

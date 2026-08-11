@@ -292,6 +292,7 @@ const maintenanceRuntime = createMaintenanceRuntime({
   resolvePromptUsername,
   markMemoryExtractionCheckpointFromContext,
   semanticMaintenanceCoordinator,
+  buildContext,
 });
 const {
   blockToolsExcept, latestHumanIdentity, createPostReplyMaintenanceTools,

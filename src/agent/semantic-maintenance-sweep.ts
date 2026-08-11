@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Client, Guild } from "discord.js";
 import type { GuildConfig } from "../config/types.ts";
 import type { Database } from "../db/database.ts";
+import type { AssembledContext } from "./context-assembly.ts";
 import { listInnerThreads, type InnerThread } from "../db/inner-thread-repository.ts";
 import { insertPromptOnlyBotMessage } from "../db/message-state-repository.ts";
 import { getSemanticMaintenanceSweepState, setSemanticMaintenanceSweepState, type SemanticMaintenanceSweepState } from "../db/semantic-maintenance-repository.ts";
@@ -47,6 +48,7 @@ export function createSemanticMaintenanceSweep(input: {
   coordinator: SemanticMaintenanceCoordinator;
   profileId: () => string;
   resolvePromptUsername: (guild: Guild, userId: string) => string | undefined;
+  buildContext: (trigger: SweepTrigger) => Promise<AssembledContext>;
   createTools: (input: {
     guild: Guild;
     guildConfig: GuildConfig;
@@ -108,14 +110,35 @@ export function createSemanticMaintenanceSweep(input: {
     const sourceMessageId = trigger.memoryRequest.sourceMessageId
       ?? trigger.memoryRequest.incomingMessage.messageId
       ?? `sweep-${now}`;
-    const currentUserId = trigger.memoryRequest.context.memoryFocusUserId
-      ?? trigger.memoryRequest.incomingMessage.authorId;
+    const freshContext = await input.buildContext(trigger);
+    const context = {
+      ...freshContext,
+      sections: freshContext.sections.filter((section) => !["Memories", "Relationships", "Inner Threads"].includes(section.label)),
+    };
+    const { maintenanceTranscript: _transcript, promptContext: _promptContext, ...actorRequest } = trigger.memoryRequest;
+    const memoryRequest: MemoryExtractionRequest = {
+      ...actorRequest,
+      assistantReply: "",
+      recentContext: context.sections
+        .filter((section) => section.label === "Chat History — Newer")
+        .map((section) => section.text)
+        .join("\n\n"),
+      context,
+      incomingMessage: {
+        ...actorRequest.incomingMessage,
+        currentContentInHistory: true,
+        imageInputs: undefined,
+      },
+    };
+    const sweepTrigger: SweepTrigger = { ...trigger, source: "sweep", memoryRequest };
+    const currentUserId = memoryRequest.context.memoryFocusUserId
+      ?? memoryRequest.incomingMessage.authorId;
     const currentUsername = input.resolvePromptUsername(trigger.guild, currentUserId)
-      ?? trigger.memoryRequest.incomingMessage.authorUsername;
+      ?? memoryRequest.incomingMessage.authorUsername;
     const createTools = (dryRun: boolean): AgentTool[] => input.createTools({
       guild: trigger.guild,
       guildConfig: trigger.guildConfig,
-      memoryRequest: trigger.memoryRequest,
+      memoryRequest,
       currentUserId,
       currentUsername,
       sourceMessageId,
@@ -198,7 +221,7 @@ export function createSemanticMaintenanceSweep(input: {
     try {
       if (memoryContext !== "") {
         await input.runMemoryPass({
-          ...trigger,
+          ...sweepTrigger,
           currentUserId,
           currentUsername,
           maintenanceTools: stagedTools,
@@ -210,7 +233,7 @@ export function createSemanticMaintenanceSweep(input: {
       }
       if (relationshipContext !== "") {
         await input.runRelationshipPass({
-          ...trigger,
+          ...sweepTrigger,
           currentUserId,
           currentUsername,
           maintenanceTools: stagedTools,
@@ -220,12 +243,7 @@ export function createSemanticMaintenanceSweep(input: {
       }
       if (threadContext !== "") {
         await input.runInnerThreadPass({
-          guildConfig: trigger.guildConfig,
-          memoryRequest: trigger.memoryRequest,
-          guild: trigger.guild,
-          channel: trigger.channel,
-          sourceRequestId: trigger.sourceRequestId,
-          source: trigger.source,
+          ...sweepTrigger,
           maintenanceTools: stagedTools,
           maintenanceContextOverride: threadContext,
           modelProfile: config.modelProfile,
@@ -245,7 +263,7 @@ export function createSemanticMaintenanceSweep(input: {
           insertPromptOnlyBotMessage(input.db, {
             id: `prompt-only:maintenance-sweep:${sourceMessageId}:${now}`,
             guildId: trigger.guild.id,
-            channelId: trigger.memoryRequest.incomingMessage.channelId ?? "",
+            channelId: memoryRequest.incomingMessage.channelId ?? "",
             botUserId: input.client.user.id,
             botUsername: input.client.user.username,
             content: `<maintenance-sweep memories="${applied.get("record_memory") ?? 0}" relationships="${applied.get("record_relationship") ?? 0}" inner_threads="${applied.get("record_inner_threads") ?? 0}"/>`,
