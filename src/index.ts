@@ -800,6 +800,7 @@ async function shutdown(signal: string): Promise<void> {
   stopMaintenanceCleanup();
   clearInterval(vpnSessionCleanupTimer);
   configReloadRuntime.close();
+  semanticMaintenanceCoordinator.close();
   ambientRuntime.clearAmbientAttentionState();
   ambientRuntime.clearAmbientInitiativeState();
   privateLifeRuntime.clear();

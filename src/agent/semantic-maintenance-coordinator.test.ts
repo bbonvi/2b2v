@@ -74,6 +74,28 @@ describe("SemanticMaintenanceCoordinator", () => {
     expect(ranAt - startedAt).toBeLessThan(80);
   });
 
+  test("close cancels queued bursts and ignores later work", async () => {
+    const coordinator = new SemanticMaintenanceCoordinator();
+    const runs: string[] = [];
+    const queued = coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 60_000,
+      maxWaitMs: 60_000,
+      run: () => { runs.push("queued"); return Promise.resolve(); },
+    });
+
+    coordinator.close();
+    await queued;
+    await coordinator.scheduleBurst({
+      key: "g:c",
+      quietAfterMs: 0,
+      maxWaitMs: 0,
+      run: () => { runs.push("late"); return Promise.resolve(); },
+    });
+
+    expect(runs).toEqual([]);
+  });
+
   test("commits in reservation order while inference completes out of order", async () => {
     const coordinator = new SemanticMaintenanceCoordinator();
     const first = coordinator.reserve();

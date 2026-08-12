@@ -27,6 +27,7 @@ export class SemanticMaintenanceCoordinator {
   private nextSequence = 1;
   private tail = Promise.resolve();
   private readonly pendingBursts = new Map<string, PendingBurst>();
+  private closed = false;
 
   /** Debounce one channel while enforcing a maximum wait from its first action. */
   scheduleBurst(input: {
@@ -36,6 +37,7 @@ export class SemanticMaintenanceCoordinator {
     run: () => Promise<void>;
     now?: number;
   }): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const now = input.now ?? Date.now();
     const existing = this.pendingBursts.get(input.key);
     const firstAt = existing?.firstAt ?? now;
@@ -58,6 +60,16 @@ export class SemanticMaintenanceCoordinator {
     };
     this.pendingBursts.set(input.key, pending);
     return promise;
+  }
+
+  /** Cancel delayed work so shutdown does not wait for debounce timers. */
+  close(): void {
+    this.closed = true;
+    for (const pending of this.pendingBursts.values()) {
+      clearTimeout(pending.timer);
+      pending.waiters.forEach((waiter) => waiter.resolve());
+    }
+    this.pendingBursts.clear();
   }
 
   reserve(): MaintenanceCommitTicket {
