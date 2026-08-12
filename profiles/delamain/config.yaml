@@ -7,14 +7,14 @@ modelProfiles:
     provider: openai-codex
     model: gpt-5.6-sol
     modelParams: { textVerbosity: low }
-    thinkingLevel: medium
+    thinkingLevel: low
     codexTransport: websocket-cached
     promptCaching: { enabled: true }
   imageGeneration:
     provider: openai-codex
     model: gpt-5.6-sol
     modelParams: {}
-    thinkingLevel: medium
+    thinkingLevel: low
     codexTransport: websocket-cached
     promptCaching: { enabled: true }
   evaluator:
