@@ -82,6 +82,11 @@ export interface CodexGenerateImageToolDeps {
   resolveExternalReference?: (url: string, signal?: AbortSignal) => Promise<ReferenceImageInput>;
   resolveAvatarReference?: (userId: string, signal?: AbortSignal) => Promise<ReferenceImageInput | null>;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
+  /** Persist a synchronous result for explicit delivery instead of queuing it on the next message. */
+  stageGeneratedImage?: (attachment: GeneratedImageAttachment) => Promise<{
+    assetRef: string;
+    workspacePath: string;
+  }>;
   /** Tool-result template used when an async image job request is not accepted. */
   asyncJobAlreadyActiveTemplate?: string;
   /** Tool-result template used after a new async image job is queued. */
@@ -96,8 +101,7 @@ export interface CodexGenerateImageToolDeps {
 }
 
 type CodexGenerateImageDetails =
-  | {
-    generatedAttachmentIds: string[];
+  | ({
     provider: "openai-codex";
     model: string;
     backendImageModel: "gpt-image-2";
@@ -111,7 +115,10 @@ type CodexGenerateImageDetails =
     requestedSize?: string;
     actualSize?: string;
     usage?: unknown;
-  }
+  } & (
+    | { generatedAttachmentIds: string[] }
+    | { stagedAssetRef: string; workspacePath: string }
+  ))
   | {
     asyncJobId: string;
     asyncJobStatus: string;
@@ -343,7 +350,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       const actualSize = await imageSizeFromBuffer(buffer);
       const attachmentId = randomUUID();
       const filename = `codex-image-${attachmentId}.${imageExtensionForMime(actualMime)}`;
-      deps.onGeneratedImage({
+      const attachment: GeneratedImageAttachment = {
         id: attachmentId,
         buffer,
         filename,
@@ -354,7 +361,11 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         actualSize,
         transport: parsed.transport,
         is4k,
-      });
+      };
+      const staged = deps.stageGeneratedImage === undefined
+        ? undefined
+        : await deps.stageGeneratedImage(attachment);
+      if (staged === undefined) deps.onGeneratedImage(attachment);
 
       const summary = [
         `Generated image via openai-codex/${deps.model} using backend ${BACKEND_IMAGE_MODEL}.`,
@@ -362,17 +373,23 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         `4K: ${is4k ? "yes" : "no"}.`,
         parsed.requestedSize !== undefined ? `Requested size: ${parsed.requestedSize}.` : "",
         actualSize !== undefined ? `Actual size: ${actualSize}.` : "",
-        `Attachment ID: ${attachmentId}.`,
+        staged === undefined
+          ? `Attachment ID: ${attachmentId}.`
+          : `Staged asset ref: ${staged.assetRef}.`,
         references.length > 0 ? `References: ${JSON.stringify(references)}.` : "",
-        `Status: ${parsed.image.status}.`,
+        "Status: ready.",
         parsed.image.revisedPrompt !== undefined ? `Revised prompt: ${parsed.image.revisedPrompt}` : "",
-        "The runtime received the generated image.",
+        staged === undefined
+          ? "The runtime received the generated image."
+          : `The image has not been sent. To post it, send a visible message with asset_ids=["${staged.assetRef}"] to the channel you choose. You may also inspect it or leave it unused.`,
       ].filter((part) => part !== "").join(" ");
 
       return {
         content: [{ type: "text", text: summary }],
         details: {
-          generatedAttachmentIds: [attachmentId],
+          ...(staged === undefined
+            ? { generatedAttachmentIds: [attachmentId] }
+            : { stagedAssetRef: staged.assetRef, workspacePath: staged.workspacePath }),
           provider: "openai-codex",
           model: deps.model,
           backendImageModel: BACKEND_IMAGE_MODEL,

@@ -4,7 +4,7 @@ import { type loadGlobalConfig } from "../config/loader";
 import type { GuildConfig } from "../config/types";
 import { channelDisplayName, createTargetChannelResolver, createTypingController, isSendableGuildChannel, type SendableGuildChannel } from "../discord/message-sender";
 import { handleMessage } from "../agent/handler";
-import { type IncomingMessage, type MessageSender, type OutboundAttachment } from "../agent/turn-types";
+import { type IncomingMessage, type MessageSender } from "../agent/turn-types";
 import { type HistoryMessage } from "../agent/history-types";
 import { loadExternalImage } from "../agent/external-image";
 import { createCodexGenerateImageTool, type ReferenceImageInput } from "../agent/codex-image-tool";
@@ -14,20 +14,20 @@ import { loadAssetReferenceImage, loadStagedAssetReferenceImage, resolvedLinkRef
 import { type LinkContentCache, resolveLinkContent } from "../agent/link-content.ts";
 import { resolveModelProfile } from "../llm/client";
 import { getAssetById } from "../db/asset-repository";
-import { createStagedAsset, getStagedAsset, getStagedAssetForJob } from "../db/staged-asset-repository";
+import { getStagedAsset, getStagedAssetForJob } from "../db/staged-asset-repository";
 import { dashboardTriggerLocation } from "../dashboard/management-runtime";
 import { type PromptBundle } from "../config/instruction-bundle";
 import { createDiscordReplyFallbackDeps } from "../discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
-import { basename, join } from "path";
+import { join } from "path";
 import type { Database } from "../db/database";
 import { type Client, type Guild, type GuildMember, type Message, type TextChannel, type ThreadChannel } from "discord.js";
 import type { createContextRuntime } from "./context-runtime";
 import type { createMaintenanceRuntime } from "./maintenance-runtime";
 import type { createToolRuntime } from "./tool-runtime";
 import type { createTurnRuntime } from "./turn-runtime";
-import { ensureStagedDirectory } from "./staged-path.ts";
+import { stageGeneratedImage } from "./generated-image-staging.ts";
 
 export function createImageJobRuntime(input: {
   db: Database;
@@ -425,28 +425,22 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const latest = agentJobs.get(job.id);
     if (latest === undefined || !isActiveJobStatus(latest.status)) return;
     const generationInput = renderImageGenerationInput(job.input);
-    const outboundAttachment: OutboundAttachment = attachment;
+    const outboundAttachment = attachment;
     const stagedRef = `job_${job.id.replace(/[^A-Za-z0-9]/g, "")}`;
-    const stagedDirectory = await ensureStagedDirectory(stagingRoot, stagedRef);
-    const stagedFilename = basename(outboundAttachment.filename);
-    const stagedPath = join(stagedDirectory, stagedFilename);
-    await Bun.write(stagedPath, outboundAttachment.buffer);
-    createStagedAsset(db, {
+    const staged = await stageGeneratedImage({
+      db,
+      stagingRoot,
       ref: stagedRef,
       jobId: job.id,
       ownerGuildId: job.deliveryGuildId,
       ownerChannelId: job.deliveryChannelId,
-      filename: stagedFilename,
-      contentType: outboundAttachment.contentType,
-      storagePath: stagedPath,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      attachment: outboundAttachment,
     });
     agentJobs.markReady(job.id, {
       stagedAssetRef: stagedRef,
-      workspacePath: `/workspace/staged-assets/${stagedRef}/${stagedFilename}`,
+      workspacePath: staged.workspacePath,
       attachmentId: outboundAttachment.id,
-      filename: stagedFilename,
+      filename: staged.filename,
       contentType: outboundAttachment.contentType,
       byteSize: outboundAttachment.buffer.length,
       is4k: job.input.is4k,
@@ -472,7 +466,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const completionInstruction = runtimeContextTemplate("async-image-ready", {
       jobId: job.id,
       stagedAssetRef: stagedRef,
-      workspacePath: `/workspace/staged-assets/${stagedRef}/${stagedFilename}`,
+      workspacePath: staged.workspacePath,
       requesterUsername: job.requesterUsername,
       requesterId: job.requesterId,
       ...readyMetadata,
@@ -485,7 +479,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     }, [
       `[Async Image Job Ready] Job ${job.id} generated an image.`,
       `Staged asset ref: ${stagedRef}.`,
-      `Workspace path: /workspace/staged-assets/${stagedRef}/${stagedFilename}.`,
+      `Workspace path: ${staged.workspacePath}.`,
       `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
       `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
       `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,

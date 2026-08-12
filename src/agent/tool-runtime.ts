@@ -58,6 +58,7 @@ import { WorkspaceClient } from "../workspace/client.ts";
 import { createWorkspaceTools } from "./workspace-tool.ts";
 import { createAgentControlTools } from "./agent-control-tool.ts";
 import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
+import { stageGeneratedImage } from "./generated-image-staging.ts";
 
 export function createToolRuntime(input: {
     db: Database;
@@ -794,6 +795,15 @@ function buildAgentTools(
       resolveExternalReference: loadExternalReference,
       resolveAvatarReference: (userId, signal) => loadGuildAvatarReference(guild, userId, signal),
       onGeneratedImage: onGeneratedImage ?? (() => {}),
+      ...(effectiveCurrentRequest === undefined ? {
+        stageGeneratedImage: async (attachment: GeneratedImageAttachment) => await stageGeneratedImage({
+          db,
+          stagingRoot: workspaceStagingRoot,
+          ownerGuildId: guildId,
+          ownerChannelId: channelId,
+          attachment,
+        }),
+      } : {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
         const deliveryChannelId = options.imageDelivery?.channelId ?? channelId;
         const deliveryGuildId = options.imageDelivery?.guildId

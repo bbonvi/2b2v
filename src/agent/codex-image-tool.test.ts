@@ -48,6 +48,24 @@ function fakeCodexAuthPath(): string {
 }
 
 describe("parseCodexImageSse", () => {
+  test("treats image bytes as complete when the provider retains a generating status", async () => {
+    const parsed = await parseCodexImageSse(sseResponse([{
+      type: "response.output_item.done",
+      item: {
+        type: "image_generation_call",
+        id: "ig_stale",
+        status: "generating",
+        result: "ZmFrZS1pbWFnZQ==",
+      },
+    }]));
+
+    expect(parsed.image).toEqual({
+      id: "ig_stale",
+      status: "completed",
+      result: "ZmFrZS1pbWFnZQ==",
+    });
+  });
+
   test("waits past image generation items that do not yet include result data", async () => {
     const parsed = await parseCodexImageSse(sseResponse([
       {
@@ -315,6 +333,57 @@ describe("4K image sizing", () => {
 });
 
 describe("createCodexGenerateImageTool", () => {
+  test("stages a synchronous image for explicit delivery", async () => {
+    let stagedFilename = "";
+    let queuedInMemory = false;
+    const fetchFn = Object.assign(
+      () => Promise.resolve(sseResponse([{
+        type: "response.output_item.done",
+        item: {
+          type: "image_generation_call",
+          id: "ig_sync",
+          status: "generating",
+          result: Buffer.from("generated-image").toString("base64"),
+        },
+      }])),
+      { preconnect: fetch.preconnect },
+    );
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: fakeCodexAuthPath(),
+      model: "gpt-5.5",
+      imageReferenceMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      fetchFn,
+      onGeneratedImage: () => {
+        queuedInMemory = true;
+      },
+      stageGeneratedImage: (attachment) => {
+        stagedFilename = attachment.filename;
+        return Promise.resolve({
+          assetRef: "generated_test",
+          workspacePath: "/workspace/staged-assets/generated_test/image.webp",
+        });
+      },
+    });
+
+    const result = await tool.execute("call-sync", { prompt: "a blue house" });
+    const resultText = result.content
+      .filter((item): item is { type: "text"; text: string } => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+
+    expect(stagedFilename).toEndWith(".webp");
+    expect(queuedInMemory).toBe(false);
+    expect(resultText).toContain("Staged asset ref: generated_test.");
+    expect(resultText).toContain("Status: ready.");
+    expect(resultText).toContain('asset_ids=["generated_test"]');
+    expect(result.details).toMatchObject({
+      stagedAssetRef: "generated_test",
+      workspacePath: "/workspace/staged-assets/generated_test/image.webp",
+    });
+    expect(result.details).not.toHaveProperty("generatedAttachmentIds");
+  });
+
   test("defaults async image jobs to WebP and non-4K", async () => {
     let observed: { outputFormat: string; is4k: boolean } | undefined;
     const tool = createCodexGenerateImageTool({

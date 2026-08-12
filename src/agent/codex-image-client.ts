@@ -229,7 +229,9 @@ function imageFromRecord(record: Record<string, unknown>): ParsedCodexResponse["
   if (typeof record.result !== "string" || record.result === "") return undefined;
   return {
     id: typeof record.id === "string" && record.id !== "" ? record.id : "image_generation",
-    status: typeof record.status === "string" ? record.status : "completed",
+    // A non-empty result is the completed image. Some Responses events retain
+    // the earlier "generating" item status even after adding the final bytes.
+    status: "completed",
     result: record.result,
     ...(typeof record.revised_prompt === "string" ? { revisedPrompt: record.revised_prompt } : {}),
   };
