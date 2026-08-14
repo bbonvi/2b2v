@@ -12,7 +12,7 @@ import { abortReason, abortable, assertActionCanCommit, completeModelTurnWithRet
 import { agentTimeBudgetExhaustedMessage, toolBudgetExhaustedMessage, toolToOpenRouterTool } from "./turn-prompt.ts";
 
 const MAX_INTERNAL_SKILL_LOADS_PER_LOOP = 8;
-const MAX_CONSECUTIVE_TEXT_CONTINUATIONS = 2;
+const MAX_CONSECUTIVE_CONTINUATIONS = 2;
 
 function parseToolArguments(call: OpenRouterToolCall): Record<string, unknown> {
   let parsed: unknown;
@@ -327,7 +327,7 @@ export async function runNativeToolLoop(input: {
   let agentTimeBudgetMarked = false;
   let asyncImageJobCreated = false;
   let correctedInvalidMessageDirectives = false;
-  let consecutiveTextContinuations = 0;
+  let consecutiveContinuations = 0;
   const allowEmptyFinalResponse = (): boolean => typeof input.allowEmptyFinalResponse === "function"
     ? input.allowEmptyFinalResponse()
     : input.allowEmptyFinalResponse === true;
@@ -490,7 +490,7 @@ export async function runNativeToolLoop(input: {
       throw error;
     }
     if (result.toolCalls.length > 0) {
-      consecutiveTextContinuations = 0;
+      consecutiveContinuations = 0;
       assertActionCanCommit(input.signal, "Agent loop aborted before tool execution.");
       input.onActionCommitted?.();
     }
@@ -522,11 +522,11 @@ export async function runNativeToolLoop(input: {
         continue;
       }
 
-      if (parsedDirectives.continueResponse === true) {
+      if (parsedDirectives.continueLoop === true) {
         input.messages.push(assistantMessageFromResult({ ...result, text }));
-        if (consecutiveTextContinuations >= MAX_CONSECUTIVE_TEXT_CONTINUATIONS) {
-          input.log?.warn("native reply text continuation cap reached", {
-            maxConsecutiveContinuations: MAX_CONSECUTIVE_TEXT_CONTINUATIONS,
+        if (consecutiveContinuations >= MAX_CONSECUTIVE_CONTINUATIONS) {
+          input.log?.warn("native reply continuation cap reached", {
+            maxConsecutiveContinuations: MAX_CONSECUTIVE_CONTINUATIONS,
           });
           return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
         }
@@ -540,7 +540,7 @@ export async function runNativeToolLoop(input: {
           input.onActionCommitted?.();
           await input.onStillWorking?.(undefined);
         }
-        consecutiveTextContinuations += 1;
+        consecutiveContinuations += 1;
         continue;
       }
 

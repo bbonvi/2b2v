@@ -13,8 +13,6 @@ export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
-  /** Request another model turn after this message when no tool call already continues the loop. */
-  continueResponse?: boolean;
   assetIds?: AssetRef[];
 }
 
@@ -26,8 +24,8 @@ export interface ParsedResponseDirectives {
   /** Authored private monologue removed from every user-visible transport. */
   privateThoughts?: string[];
   malformedPrivateOutput?: boolean;
-  /** The final visible message explicitly keeps this response run active. */
-  continueResponse?: boolean;
+  /** A final private directive explicitly keeps this response run active. */
+  continueLoop?: boolean;
   segments: ResponseSegment[];
 }
 
@@ -54,13 +52,15 @@ interface ParseContext {
   malformedPrivateOutput: boolean;
 }
 
-const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|handoff|ignore)(?=[\s/>])/i;
+const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|handoff|ignore|continue)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
 const PRIVATE_TAG_RE = /<\s*(\/?)\s*(scene|thoughts?)(?=[\s/>])([^>]*)>/gi;
 const PRIVATE_TAG_PREFIX_RE = /<\s*\/?\s*(?:scene|thoughts?)(?=[\s/>]|$)/i;
 const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|handoff|ignore)(?=[\s/>])([^>]*)>/gi;
 const HANDOFF_TAG_PREFIX_RE = /<\s*\/?\s*handoff(?=[\s/>]|$)/i;
 const RESPONSE_TAG_PREFIX_RE = /<\s*\/?\s*(?:thoughts?|voice|audio|message|handoff|ignore)(?=[\s/>]|$)/i;
+const CONTINUE_TAG_RE = /<\s*(\/?)\s*continue(?=[\s/>])([^>]*)>/gi;
+const CONTINUE_TAG_PREFIX_RE = /<\s*\/?\s*continue(?=[\s/>]|$)/i;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
 const URL_PATTERN = "https?:\\/\\/[^\\s<>()]+";
@@ -125,6 +125,60 @@ function stripPrivateBlocks(text: string): {
     text: stripped,
     thoughts,
     malformed: PRIVATE_TAG_PREFIX_RE.test(stripped),
+  };
+}
+
+/** Remove the private loop-control marker before visible response parsing. */
+function stripContinueDirective(text: string): {
+  text: string;
+  requested: boolean;
+  errors: string[];
+} {
+  const normalized = text.replace(
+    /<\s*continue\s*>\s*<\s*\/\s*continue\s*>/gi,
+    "<continue/>",
+  );
+  const visible: string[] = [];
+  const validMatches: Array<{ end: number }> = [];
+  const errors = new Set<string>();
+  const tagRe = new RegExp(CONTINUE_TAG_RE.source, "gi");
+  let cursor = 0;
+
+  for (;;) {
+    const match = tagRe.exec(normalized);
+    if (match === null) break;
+    visible.push(normalized.slice(cursor, match.index));
+    cursor = tagRe.lastIndex;
+
+    const closing = match[1] === "/";
+    const attrs = match[2] ?? "";
+    const selfClosing = /\/\s*$/.test(attrs);
+    const attributeText = attrs.replace(/\/\s*$/, "").trim();
+    if (closing || !selfClosing || attributeText !== "") {
+      errors.add("Use only the self-closing <continue/> directive without attributes or content.");
+      continue;
+    }
+    validMatches.push({ end: tagRe.lastIndex });
+  }
+  visible.push(normalized.slice(cursor));
+
+  const stripped = visible.join("").trim();
+  if (CONTINUE_TAG_PREFIX_RE.test(stripped)) {
+    errors.add("Use only the self-closing <continue/> directive without attributes or content.");
+  }
+  if (validMatches.length > 1) {
+    errors.add("Only one <continue/> directive is allowed.");
+  } else {
+    const match = validMatches[0];
+    if (match !== undefined && normalized.slice(match.end).trim() !== "") {
+      errors.add("<continue/> must be the final directive in the model output.");
+    }
+  }
+
+  return {
+    text: stripped,
+    requested: validMatches.length === 1 && errors.size === 0,
+    errors: [...errors],
   };
 }
 
@@ -263,7 +317,7 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
   const parsed = parseAttributes(attrs);
   const errors = [...parsed.errors];
   const seen = new Set<string>();
-  const supported = new Set(["channel_id", "reply", "reply_to", "keep_typing", "continue", "asset_ids"]);
+  const supported = new Set(["channel_id", "reply", "reply_to", "keep_typing", "asset_ids"]);
 
   for (const attribute of parsed.attributes) {
     const { name, value } = attribute;
@@ -280,16 +334,14 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
     if (name === "channel_id") {
       if (value === "") errors.push('Attribute "channel_id" must not be empty.');
       else delivery.channelId = value;
-    } else if (name === "reply" || name === "keep_typing" || name === "continue") {
+    } else if (name === "reply" || name === "keep_typing") {
       const normalized = value.toLowerCase();
       if (normalized !== "true" && normalized !== "false") {
         errors.push(`Attribute "${name}" must be "true" or "false".`);
       } else if (name === "reply") {
         delivery.reply = normalized === "true";
-      } else if (name === "keep_typing") {
-        delivery.keepTyping = normalized === "true";
       } else {
-        delivery.continueResponse = normalized === "true";
+        delivery.keepTyping = normalized === "true";
       }
     } else if (name === "reply_to") {
       if (value === "") errors.push('Attribute "reply_to" must not be empty.');
@@ -310,7 +362,6 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
     || delivery.reply !== undefined
     || delivery.replyTo !== undefined
     || delivery.keepTyping !== undefined
-    || delivery.continueResponse !== undefined
     || delivery.assetIds !== undefined;
   return { ...(hasDelivery ? { delivery } : {}), errors };
 }
@@ -526,13 +577,10 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   if (privateResult.malformed) {
     return { ignored: false, malformedPrivateOutput: true, segments: [] };
   }
-  const context: ParseContext = { directiveErrors: [], malformedPrivateOutput: false };
-  const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null, context);
+  const continuation = stripContinueDirective(privateResult.text);
+  const context: ParseContext = { directiveErrors: [...continuation.errors], malformedPrivateOutput: false };
+  const parsed = parseRange(continuation.text, 0, { kind: "text" }, null, context);
   const segments = normalizeMessageBreaks(parsed.segments);
-  const continuation = continuationDirective(segments);
-  if (continuation.misplaced) {
-    context.directiveErrors.push('Attribute "continue" may be "true" only on the final <message>.');
-  }
   return {
     ignored: parsed.ignored,
     ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
@@ -540,42 +588,11 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
     ...(privateResult.thoughts.length > 0 ? { privateThoughts: privateResult.thoughts } : {}),
     ...(context.malformedPrivateOutput ? { malformedPrivateOutput: true } : {}),
     ...(continuation.requested && context.directiveErrors.length === 0 && !context.malformedPrivateOutput
-      ? { continueResponse: true }
+      ? { continueLoop: true }
       : {}),
     segments: parsed.ignored || context.directiveErrors.length > 0 || context.malformedPrivateOutput
       ? []
       : segments,
-  };
-}
-
-function continuationDirective(segments: ResponseSegment[]): { requested: boolean; misplaced: boolean } {
-  const messages: Array<{ hasOutput: boolean; continueResponse: boolean }> = [];
-  let current = { hasOutput: false, continueResponse: false };
-
-  const finishCurrent = (): void => {
-    if (current.hasOutput) messages.push(current);
-    current = { hasOutput: false, continueResponse: false };
-  };
-
-  for (const segment of segments) {
-    if (segment.kind === "text" || segment.kind === "voice") {
-      current.hasOutput = true;
-      continue;
-    }
-    if (segment.kind === "emptyMessage") {
-      finishCurrent();
-      messages.push({ hasOutput: true, continueResponse: segment.delivery.continueResponse === true });
-      continue;
-    }
-    if (current.hasOutput) finishCurrent();
-    current.continueResponse = segment.delivery?.continueResponse === true;
-  }
-  finishCurrent();
-
-  const lastIndex = messages.length - 1;
-  return {
-    requested: lastIndex >= 0 && messages[lastIndex]?.continueResponse === true,
-    misplaced: messages.some((message, index) => message.continueResponse && index !== lastIndex),
   };
 }
 

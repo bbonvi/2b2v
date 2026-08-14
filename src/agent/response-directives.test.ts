@@ -128,28 +128,52 @@ describe("parseResponseDirectives", () => {
     });
   });
 
-  test("requests another model turn from only the final message", () => {
-    expect(parseResponseDirectives('<message>first</message><message continue="true">second</message>')).toEqual({
+  test("requests another model turn from a final private continue directive", () => {
+    expect(parseResponseDirectives('<message>first</message><message>second</message><continue/>')).toEqual({
       ignored: false,
-      continueResponse: true,
+      continueLoop: true,
       segments: [
         { kind: "text", text: "first" },
-        { kind: "messageBreak", delivery: { continueResponse: true } },
+        { kind: "messageBreak" },
         { kind: "text", text: "second" },
       ],
     });
-    expect(parseResponseDirectives('<message continue="false">done</message>')).toEqual({
+    expect(parseResponseDirectives('<thoughts>private preparation</thoughts><continue/>')).toEqual({
       ignored: false,
-      segments: [
-        { kind: "messageBreak", delivery: { continueResponse: false } },
-        { kind: "text", text: "done" },
-      ],
-    });
-    expect(parseResponseDirectives('<message continue="true">first</message><message>second</message>')).toEqual({
-      ignored: false,
-      directiveErrors: ['Attribute "continue" may be "true" only on the final <message>.'],
+      privateThoughts: ["private preparation"],
+      continueLoop: true,
       segments: [],
     });
+    for (const directive of ["<continue/>", "<continue />", "<continue></continue>"]) {
+      expect(parseResponseDirectives(directive)).toEqual({
+        ignored: false,
+        continueLoop: true,
+        segments: [],
+      });
+    }
+  });
+
+  test("removes continue from message delivery attributes", () => {
+    expect(parseResponseDirectives('<message continue="true">done</message>')).toEqual({
+      ignored: false,
+      directiveErrors: ['Unknown <message> attribute "continue".'],
+      segments: [],
+    });
+  });
+
+  test("rejects malformed, duplicate, or misplaced continue directives", () => {
+    for (const response of [
+      "<continue>text</continue>",
+      '<continue reason="work"/>',
+      "<continue/><continue/>",
+      "<continue/>later",
+      "<continue",
+    ]) {
+      const parsed = parseResponseDirectives(response);
+      expect(parsed.directiveErrors).toBeDefined();
+      expect(parsed.segments).toEqual([]);
+      expect(parsed.continueLoop).toBeUndefined();
+    }
   });
 
   test("extracts one multiline handoff from each message without changing visible text", () => {
