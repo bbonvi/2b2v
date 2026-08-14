@@ -49,6 +49,8 @@ export interface ImageGenerationJobInput {
   references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
+  generationRunId?: string;
+  generationIndex?: number;
   replacesJobId?: string;
 }
 
@@ -155,6 +157,8 @@ export interface EnqueueImageJobInput {
   references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
+  generationRunId?: string;
+  generationIndex?: number;
   replacesJobId?: string;
   parentJobId?: string;
   now?: number;
@@ -238,6 +242,8 @@ export class AgentJobStore {
         references: input.references,
         outputFormat: input.outputFormat,
         is4k: input.is4k,
+        ...(input.generationRunId !== undefined ? { generationRunId: input.generationRunId } : {}),
+        ...(input.generationIndex !== undefined ? { generationIndex: input.generationIndex } : {}),
         ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
       },
       ...(replacementRootJobId !== undefined ? { replacementRootJobId } : {}),
@@ -330,6 +336,18 @@ export class AgentJobStore {
 
   listChildren(parentJobId: string): AgentJob[] {
     return listChildAgentJobRecords(this.db, parentJobId).map(fromRecord);
+  }
+
+  /** List image jobs requested by one model loop in stable request order. */
+  listImageGenerationRun(generationRunId: string): ImageGenerationAgentJob[] {
+    return listAgentJobRecords(this.db, { imageGenerationRunId: generationRunId })
+      .map(fromRecord)
+      .filter((job): job is ImageGenerationAgentJob => job.kind === "image_generation")
+      .sort((a, b) => {
+        const index = (a.input.generationIndex ?? Number.MAX_SAFE_INTEGER)
+          - (b.input.generationIndex ?? Number.MAX_SAFE_INTEGER);
+        return index === 0 ? compareJobsOldestFirst(a, b) : index;
+      });
   }
 
   start(id: string, abort?: () => void, now = Date.now()): AgentJob | undefined {

@@ -9,7 +9,7 @@ import { type HistoryMessage } from "../agent/history-types";
 import { loadExternalImage } from "../agent/external-image";
 import { createCodexGenerateImageTool, type ReferenceImageInput } from "../agent/codex-image-tool";
 import { type AgentJobStore, isActiveJobStatus, type ImageGenerationJobResult } from "../agent/job-runtime";
-import { buildAsyncImageReadyMetadata, createGeneratedImageRuntime, imageReferencesForToolInput, renderImageGenerationInput } from "../agent/generated-image-runtime";
+import { buildAsyncImageReadyMetadata, createGeneratedImageRuntime, imageReferencesForToolInput, renderImageGenerationInput, renderImageGenerationRunContext } from "../agent/generated-image-runtime";
 import { loadAssetReferenceImage, loadStagedAssetReferenceImage, resolvedLinkReferenceImage } from "../agent/asset-reference-image";
 import { type LinkContentCache, resolveLinkContent } from "../agent/link-content.ts";
 import { resolveModelProfile } from "../llm/client";
@@ -299,30 +299,73 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     return completionResult.agentRan ? sentMessageId : undefined;
   }
 
+  const runReadyImageStatusTurn = async (): Promise<string | undefined> => {
+    let sentMessageId: string | undefined;
+    await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
+      // A prior serialized turn can deliver this staged output while its own
+      // completion turn is still queued. Do not give the model a stale event.
+      const current = agentJobs.get(job.id);
+      if (current?.kind !== "image_generation" || current.status !== "ready") return;
+      const staged = getStagedAssetForJob(db, current.id);
+      if (staged === null) {
+        agentJobs.markFailed(current.id, "Ready job has no durable staged asset.");
+        return;
+      }
+      const result = current.result;
+      const readyMetadata = buildAsyncImageReadyMetadata({
+        requestedSize: result?.requestedSize,
+        requestedFormat: current.input.outputFormat,
+        actualSize: result?.actualSize,
+        actualContentType: result?.contentType ?? staged.contentType,
+        byteSize: result?.byteSize ?? Bun.file(staged.storagePath).size,
+        transport: result?.transport,
+        is4k: result?.is4k ?? current.input.is4k,
+      });
+      const imageRunContext = renderImageGenerationRunContext(
+        current,
+        current.input.generationRunId === undefined
+          ? [current]
+          : agentJobs.listImageGenerationRun(current.input.generationRunId),
+      );
+      const completionInstruction = runtimeContextTemplate("async-image-ready", {
+        jobId: current.id,
+        stagedAssetRef: staged.ref,
+        workspacePath: result?.workspacePath ?? staged.storagePath,
+        requesterUsername: current.requesterUsername,
+        requesterId: current.requesterId,
+        ...readyMetadata,
+        sourceMessageId: current.sourceMessageId,
+        sourceQuote: current.sourceQuote,
+        generationInput: renderImageGenerationInput(current.input),
+        revisedPromptLine: result?.revisedPrompt !== undefined ? `Revised prompt: ${result.revisedPrompt}\n` : "",
+        imageRunContextLine: imageRunContext === "" ? "" : `${imageRunContext}\n\n`,
+        deliveryGuildId: current.deliveryGuildId,
+        deliveryChannelId: current.deliveryChannelId,
+      }, [
+        `[Async Image Job Ready] Job ${current.id} generated an image.`,
+        `Staged asset ref: ${staged.ref}.`,
+        `Workspace path: ${result?.workspacePath ?? staged.storagePath}.`,
+        imageRunContext,
+        `Original requester: @${current.requesterUsername} (${current.requesterId}).`,
+        `Source: guild ${current.guildId}, channel ${current.channelId}, MsgID ${current.sourceMessageId}; quote: ${JSON.stringify(current.sourceQuote)}.`,
+        `Intended delivery room: guild ${current.deliveryGuildId}, channel ${current.deliveryChannelId}.`,
+        "You may inspect, use, deliver, or postpone the current image. Related jobs have separate completion turns unless they are delivered first.",
+      ].filter((line) => line !== "").join("\n"));
+      sentMessageId = await runAsyncImageStatusTurn({
+        event: "ready",
+        instruction: completionInstruction,
+      });
+    });
+    return sentMessageId;
+  };
+
   try {
     if (job.status === "ready") {
       if (job.parentJobId !== undefined) {
         resumeOwner(job.id);
         return;
       }
-      const staged = getStagedAssetForJob(db, job.id);
-      if (staged === null) {
-        agentJobs.markFailed(job.id, "Ready job has no durable staged asset.");
-        return;
-      }
-      await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
-        await runAsyncImageStatusTurn({
-          event: "ready",
-          instruction: [
-            `[Async Image Job Ready] Job ${job.id} remains ready after restart.`,
-            `Staged asset ref: ${staged.ref}.`,
-            `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
-            `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
-            `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
-            "This event does not instruct you to send it. You may inspect it, deliver it explicitly, defer it, or dismiss the job deliberately.",
-          ].join("\n"),
-        });
-      });
+      await runReadyImageStatusTurn();
       return;
     }
     const started = agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
@@ -424,7 +467,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
     const latest = agentJobs.get(job.id);
     if (latest === undefined || !isActiveJobStatus(latest.status)) return;
-    const generationInput = renderImageGenerationInput(job.input);
     const outboundAttachment = attachment;
     const stagedRef = `job_${job.id.replace(/[^A-Za-z0-9]/g, "")}`;
     const staged = await stageGeneratedImage({
@@ -454,44 +496,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       return;
     }
 
-    const readyMetadata = buildAsyncImageReadyMetadata({
-      requestedSize: details?.requestedSize,
-      requestedFormat: job.input.outputFormat,
-      actualSize: details?.actualSize,
-      actualContentType: outboundAttachment.contentType,
-      byteSize: outboundAttachment.buffer.length,
-      transport: details?.transport,
-      is4k: job.input.is4k,
-    });
-    const completionInstruction = runtimeContextTemplate("async-image-ready", {
-      jobId: job.id,
-      stagedAssetRef: stagedRef,
-      workspacePath: staged.workspacePath,
-      requesterUsername: job.requesterUsername,
-      requesterId: job.requesterId,
-      ...readyMetadata,
-      sourceMessageId: job.sourceMessageId,
-      sourceQuote: job.sourceQuote,
-      generationInput,
-      revisedPromptLine: typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}\n` : "",
-      deliveryGuildId: job.deliveryGuildId,
-      deliveryChannelId: job.deliveryChannelId,
-    }, [
-      `[Async Image Job Ready] Job ${job.id} generated an image.`,
-      `Staged asset ref: ${stagedRef}.`,
-      `Workspace path: ${staged.workspacePath}.`,
-      `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
-      `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
-      `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
-      "This event does not instruct you to send it. You may inspect it, deliver it with an explicit message asset_ids reference, defer it, or dismiss the job deliberately.",
-    ].join("\n"));
-    let sentMessageId: string | undefined;
-    await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
-      sentMessageId = await runAsyncImageStatusTurn({
-        event: "ready",
-        instruction: completionInstruction,
-      });
-    });
+    const sentMessageId = await runReadyImageStatusTurn();
     if (sentMessageId !== undefined && agentJobs.get(job.id)?.status === "delivered") {
       noteAmbientBotReply({
         guildId: job.deliveryGuildId,

@@ -76,6 +76,29 @@ describe("AgentJobStore", () => {
     expect(store.listGlobalVisible().map((job) => job.id)).toEqual([first.id, second.id]);
   });
 
+  test("lists image jobs from one generation run in request order", () => {
+    const second = enqueueImage({
+      prompt: "second",
+      generationRunId: "run-1",
+      generationIndex: 2,
+      now: 1,
+    }).job;
+    const first = enqueueImage({
+      prompt: "first",
+      generationRunId: "run-1",
+      generationIndex: 1,
+      now: 2,
+    }).job;
+    enqueueImage({
+      prompt: "unrelated",
+      generationRunId: "run-2",
+      generationIndex: 1,
+      now: 3,
+    });
+
+    expect(store.listImageGenerationRun("run-1").map((job) => job.id)).toEqual([first.id, second.id]);
+  });
+
   test("atomically replaces a fresh image job and rejects a stale replacement", () => {
     const fresh = enqueueImage({ now: 1_000 }).job;
     store.start(fresh.id, undefined, 1_000);

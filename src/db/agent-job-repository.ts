@@ -133,6 +133,7 @@ export function updateAgentJobRecord(db: Database, id: string, patch: AgentJobRe
 export function listAgentJobRecords(db: Database, input: {
   guildId?: string;
   channelId?: string;
+  imageGenerationRunId?: string;
   state?: PersistedAgentJobState;
   completedAfter?: number;
   limit?: number;
@@ -146,6 +147,10 @@ export function listAgentJobRecords(db: Database, input: {
   if (input.guildId !== undefined && input.channelId !== undefined) {
     conditions.push("((guild_id = ? AND channel_id = ?) OR (delivery_guild_id = ? AND delivery_channel_id = ?))");
     params.push(input.guildId, input.channelId, input.guildId, input.channelId);
+  }
+  if (input.imageGenerationRunId !== undefined) {
+    conditions.push("kind = 'image_generation' AND json_extract(input_json, '$.generationRunId') = ?");
+    params.push(input.imageGenerationRunId);
   }
   if (input.state === "active") {
     conditions.push(`status IN (${ACTIVE_JOB_STATUSES.map(() => "?").join(", ")})`);

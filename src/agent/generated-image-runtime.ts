@@ -1,5 +1,5 @@
 import type { HistoryMessage } from "./history-types";
-import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput, type ImageReference } from "./job-runtime";
+import { isActiveJobStatus, type AgentJob, type ImageGenerationAgentJob, type ImageGenerationJobInput, type ImageReference } from "./job-runtime";
 import type { GeneratedImageAttachment } from "./codex-image-tool";
 import type { OutboundAttachment } from "./turn-types";
 import { formatFileSize } from "./format-file-size.ts";
@@ -104,6 +104,51 @@ export function buildAsyncImageReadyMetadata(input: AsyncImageReadyMetadataInput
       ? " (best-effort; the provider may return a smaller image)"
       : "",
   };
+}
+
+function imageGenerationRunState(job: ImageGenerationAgentJob): string {
+  if (job.status === "ready") {
+    const stagedAsset = job.result?.stagedAssetRef;
+    return stagedAsset === undefined
+      ? "ready and not delivered"
+      : `ready and not delivered; staged asset ${stagedAsset}`;
+  }
+  if (job.status === "delivered") {
+    return job.sentMessageId === undefined
+      ? "delivered"
+      : `delivered in MsgID ${job.sentMessageId}`;
+  }
+  return job.status;
+}
+
+/** Show live sibling state without treating completion order as request order. */
+export function renderImageGenerationRunContext(
+  current: ImageGenerationAgentJob,
+  jobs: readonly ImageGenerationAgentJob[],
+): string {
+  const runId = current.input.generationRunId;
+  if (runId === undefined) return "";
+  const ordered = jobs
+    .filter((job) => job.input.generationRunId === runId)
+    .slice()
+    .sort((a, b) => {
+      const index = (a.input.generationIndex ?? Number.MAX_SAFE_INTEGER)
+        - (b.input.generationIndex ?? Number.MAX_SAFE_INTEGER);
+      return index === 0 ? a.createdAt - b.createdAt || a.id.localeCompare(b.id) : index;
+    });
+  if (ordered.length === 0) return "";
+  const currentFallbackIndex = ordered.findIndex((job) => job.id === current.id) + 1;
+  const currentIndex = current.input.generationIndex ?? currentFallbackIndex;
+  const lines = [
+    `Current image job: ${currentIndex}/${ordered.length} ${current.id}.`,
+    "Image jobs requested in the same agent loop:",
+  ];
+  for (const [offset, job] of ordered.entries()) {
+    const index = job.input.generationIndex ?? offset + 1;
+    const currentMarker = job.id === current.id ? " (current)" : "";
+    lines.push(`- ${index}/${ordered.length} ${job.id}: ${imageGenerationRunState(job)}${currentMarker}`);
+  }
+  return lines.join("\n");
 }
 
 /** Convert normalized references back to the public image-tool input shape. */

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   buildAsyncImageReadyMetadata,
   renderAgentJobsContext,
+  renderImageGenerationRunContext,
   renderImageGenerationInput,
 } from "./generated-image-runtime";
 
@@ -60,6 +61,72 @@ test("renders compact actual metadata and conditional 4K guidance", () => {
     is4k: "no",
     fourKNote: "",
   });
+});
+
+test("renders image jobs from one model loop in request order", () => {
+  const base = {
+    kind: "image_generation" as const,
+    guildId: "g1",
+    channelId: "c1",
+    deliveryGuildId: "g1",
+    deliveryChannelId: "c1",
+    requesterId: "u1",
+    requesterUsername: "alice",
+    sourceMessageId: "m1",
+    sourceQuote: "make three images",
+    createdAt: 1_000,
+    statusChangedAt: 2_000,
+    replacementCount: 0,
+  };
+  const first = {
+    ...base,
+    id: "img-first",
+    status: "ready" as const,
+    input: {
+      prompt: "first",
+      references: [],
+      outputFormat: "webp" as const,
+      is4k: false,
+      generationRunId: "run-1",
+      generationIndex: 1,
+    },
+    result: { stagedAssetRef: "job_first" },
+  };
+  const second = {
+    ...base,
+    id: "img-second",
+    status: "running" as const,
+    input: {
+      prompt: "second",
+      references: [],
+      outputFormat: "webp" as const,
+      is4k: false,
+      generationRunId: "run-1",
+      generationIndex: 2,
+    },
+  };
+  const unrelated = {
+    ...base,
+    id: "img-unrelated",
+    status: "ready" as const,
+    input: {
+      prompt: "unrelated",
+      references: [],
+      outputFormat: "webp" as const,
+      is4k: false,
+      generationRunId: "run-2",
+      generationIndex: 1,
+    },
+  };
+
+  const rendered = renderImageGenerationRunContext(second, [second, unrelated, first]);
+
+  expect(rendered).toBe([
+    "Current image job: 2/2 img-second.",
+    "Image jobs requested in the same agent loop:",
+    "- 1/2 img-first: ready and not delivered; staged asset job_first",
+    "- 2/2 img-second: running (current)",
+  ].join("\n"));
 });
 
 test("renders compact actual prompts and durable output assets in job context", () => {

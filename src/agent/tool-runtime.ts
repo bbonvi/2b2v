@@ -59,6 +59,7 @@ import { createWorkspaceTools } from "./workspace-tool.ts";
 import { createAgentControlTools } from "./agent-control-tool.ts";
 import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
 import { stageGeneratedImage } from "./generated-image-staging.ts";
+import { randomUUID } from "node:crypto";
 
 export function createToolRuntime(input: {
     db: Database;
@@ -135,6 +136,8 @@ function buildAgentTools(
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
   const effectiveCurrentRequest = options.currentRequest ?? currentRequest;
+  const imageGenerationRunId = randomUUID();
+  let imageGenerationIndex = 0;
   const resolveUsernameInGuild = async (username: string, targetGuildId: string): Promise<string | undefined> => {
     const targetGuild = targetGuildId === guild.id ? guild : await resolveClientGuild(targetGuildId);
     if (targetGuild === null) return undefined;
@@ -805,6 +808,7 @@ function buildAgentTools(
         }),
       } : {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
+        const generationIndex = imageGenerationIndex + 1;
         const deliveryChannelId = options.imageDelivery?.channelId ?? channelId;
         const deliveryGuildId = options.imageDelivery?.guildId
           ?? (client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
@@ -823,10 +827,13 @@ function buildAgentTools(
           references: input.references,
           outputFormat: input.outputFormat,
           is4k: input.is4k,
+          generationRunId: imageGenerationRunId,
+          generationIndex,
           ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
           ...(options.parentJobId !== undefined ? { parentJobId: options.parentJobId } : {}),
         });
         if (result.created) {
+          imageGenerationIndex = generationIndex;
           trackImageJob(runImageGenerationJob(result.job.id).catch((err: unknown) => {
             log.error("async image job failed outside worker", {
               jobId: result.job.id,
