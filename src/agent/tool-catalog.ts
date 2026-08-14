@@ -244,6 +244,25 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
     summary: "Find physical lines inside one known persona notebook.",
     aliases: ["search notebook content", "find in notebook", "search notebook lines"],
   },
+  send_agent_message: {
+    group: "jobs",
+    summary: "Send a follow-up to a background agent or resume a paused one.",
+    aliases: ["message agent", "follow up agent", "resume agent", "continue agent", "send to subagent"],
+  },
+  spawn_agent: {
+    group: "jobs",
+    summary: "Delegate an independent task to an asynchronous background copy of the persona.",
+    aliases: [
+      "background agent",
+      "subagent",
+      "delegate task",
+      "delegate research",
+      "parallel work",
+      "background work",
+      "run asynchronously",
+      "long running task",
+    ],
+  },
   patch_notebook: {
     group: "continuity",
     summary: "Apply revision-checked contextual line hunks to an active notebook.",

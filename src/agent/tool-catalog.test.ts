@@ -179,6 +179,29 @@ describe("search_tools", () => {
     expect(requestedToolActivations(result)).toEqual([]);
   });
 
+  test("finds background agents through natural delegation terms", async () => {
+    const search = createSearchToolsTool({
+      tools: [tool("spawn_agent"), tool("send_agent_message")],
+      skills,
+    });
+
+    for (const query of ["subagent", "delegate research", "parallel background work"]) {
+      const result = await search.execute("call-agent", { query });
+      expect(result.details).toMatchObject({
+        matches: ["spawn_agent"],
+        activateToolNames: ["spawn_agent"],
+        requiredSkills: [],
+      });
+    }
+
+    const followUp = await search.execute("call-follow-up", { query: "resume agent" });
+    expect(followUp.details).toMatchObject({
+      matches: ["send_agent_message"],
+      activateToolNames: ["send_agent_message"],
+      requiredSkills: [],
+    });
+  });
+
   test("selects one concrete capability per query clause", async () => {
     const search = createSearchToolsTool({
       tools: [
