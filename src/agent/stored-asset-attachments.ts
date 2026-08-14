@@ -33,7 +33,6 @@ export function createStoredAssetAttachmentResolver(input: {
       if (typeof id === "string") {
         const staged = getStagedAsset(input.db, id);
         if (staged === null
-          || staged.deliveredMessageId !== undefined
           || (input.stagedGuildId !== undefined && staged.ownerGuildId !== input.stagedGuildId)) {
           input.logger.warn("staged asset attachment not found or out of scope", { assetRef: id });
           continue;

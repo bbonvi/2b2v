@@ -23,9 +23,6 @@ import { type Client, type Guild } from "discord.js";
 import type { AgentJobStore } from "./job-runtime";
 import { deleteExpiredMemories } from "../db/memory-repository";
 import { clearExpiredPrivateLifeThoughts } from "../db/private-life-repository";
-import { deleteStagedAsset, listStagedAssets } from "../db/staged-asset-repository";
-import { stat } from "fs/promises";
-import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
 import type { SemanticMaintenanceCoordinator } from "./semantic-maintenance-coordinator.ts";
 import { createSemanticMaintenanceBurst } from "./semantic-maintenance-burst.ts";
 import { createSemanticMaintenanceSweep } from "./semantic-maintenance-sweep.ts";
@@ -33,6 +30,7 @@ import type { createContextRuntime } from "./context-runtime.ts";
 import { listChannelMessages } from "../db/message-history-repository.ts";
 import { createDiscordReplyFallbackDeps } from "../discord/reply-fallback-runtime.ts";
 import type { HistoryMessage } from "./history-types.ts";
+import { cleanExpiredStagedAssets } from "./staged-asset-cleanup.ts";
 
 export function createMaintenanceRuntime(input: {
     db: Database;
@@ -939,18 +937,8 @@ function startCleanup(): () => void {
 }
 
 async function cleanStagedAssets(): Promise<void> {
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`;
-  let deleted = 0;
-  for (const staged of listStagedAssets(db, { unresolvedOnly: true, limit: 500, oldestFirst: true })) {
-    const safePath = await resolveStagedPath(stagingRoot, staged.storagePath).catch(() => null);
-    const modifiedAt = safePath === null ? 0 : await stat(safePath).then((value) => value.mtimeMs).catch(() => 0);
-    if (modifiedAt > cutoff) continue;
-    if (staged.jobId !== undefined) agentJobs.markExpired(staged.jobId);
-    if (safePath !== null) await unlinkStagedPath(stagingRoot, staged.storagePath).catch(() => {});
-    deleteStagedAsset(db, staged.ref);
-    deleted++;
-  }
+  const deleted = await cleanExpiredStagedAssets({ db, agentJobs, stagingRoot });
   if (deleted > 0) log.info("expired staged assets cleaned", { deleted });
 }
 

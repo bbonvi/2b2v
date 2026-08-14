@@ -82,7 +82,14 @@ export function getStagedAssetForJob(db: Database, jobId: string): StagedAsset |
 
 export function listStagedAssets(
   db: Database,
-  input: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number; oldestFirst?: boolean } = {},
+  input: {
+    guildId?: string;
+    channelId?: string;
+    unresolvedOnly?: boolean;
+    expiresAtOrBefore?: number;
+    limit?: number;
+    oldestFirst?: boolean;
+  } = {},
 ): StagedAsset[] {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
@@ -95,6 +102,10 @@ export function listStagedAssets(
     params.push(input.channelId);
   }
   if (input.unresolvedOnly === true) conditions.push("delivered_message_id IS NULL");
+  if (input.expiresAtOrBefore !== undefined) {
+    conditions.push("expires_at <= ?");
+    params.push(input.expiresAtOrBefore);
+  }
   params.push(input.limit ?? 100);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const direction = input.oldestFirst === true ? "ASC" : "DESC";

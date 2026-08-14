@@ -24,7 +24,6 @@ import { type PromptBundle } from "../config/instruction-bundle";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { type AsyncTaskTracker } from "../runtime/async-task-tracker";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
-import { unlinkStagedPath } from "./staged-path.ts";
 import type { Database } from "../db/database";
 import { type Client, type Guild, type TextChannel, type ThreadChannel } from "discord.js";
 
@@ -42,7 +41,7 @@ export function createTurnRuntime(input: {
   buildOutboundResolvers: (guild: Guild) => OutboundResolvers;
   noteVisiblePersonaTurn: (guildId: string) => void;
 }) {
-  const { db, client, log, agentJobs, linkContentCache, backgroundTasks, modelImageSupport, ttsClient, getGlobalConfig, getPromptBundle, buildOutboundResolvers, noteVisiblePersonaTurn } = input;
+  const { db, client, agentJobs, linkContentCache, backgroundTasks, modelImageSupport, ttsClient, getGlobalConfig, getPromptBundle, buildOutboundResolvers, noteVisiblePersonaTurn } = input;
 function persistIgnoredBotReply(input: {
   guildId: string;
   channelId: string;
@@ -123,13 +122,6 @@ function createBotDiscordMessageSender(
             stagedAssetRef: ref,
           });
         }
-        const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`;
-        await unlinkStagedPath(stagingRoot, staged.storagePath).catch((error: unknown) => {
-          log.warn("delivered staged asset cleanup failed", {
-            ref,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
       }
     },
   });

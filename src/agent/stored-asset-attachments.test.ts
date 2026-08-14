@@ -310,7 +310,7 @@ describe("stored asset attachments", () => {
     expect(attachments[0]?.buffer.toString()).toBe("staged-image");
   });
 
-  test("does not resolve an already delivered staged handle", async () => {
+  test("reuses an already delivered staged handle", async () => {
     const storagePath = `/tmp/2b2v-delivered-${crypto.randomUUID()}.webp`;
     await Bun.write(storagePath, Buffer.from("staged-image"));
     db.raw.prepare(
@@ -344,7 +344,15 @@ describe("stored asset attachments", () => {
       logger: createLogger({ level: "error" }),
     });
 
-    expect(await resolver(["job_delivered"])).toEqual([]);
+    const attachments = await resolver(["job_delivered"]);
+
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      id: "staged-job_delivered",
+      filename: "result.webp",
+      contentType: "image/webp",
+    });
+    expect(attachments[0]?.buffer.toString()).toBe("staged-image");
     await Bun.file(storagePath).delete();
   });
 });
