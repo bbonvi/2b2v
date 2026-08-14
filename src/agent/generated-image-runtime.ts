@@ -134,7 +134,9 @@ export function renderImageGenerationRunContext(
     .sort((a, b) => {
       const index = (a.input.generationIndex ?? Number.MAX_SAFE_INTEGER)
         - (b.input.generationIndex ?? Number.MAX_SAFE_INTEGER);
-      return index === 0 ? a.createdAt - b.createdAt || a.id.localeCompare(b.id) : index;
+      if (index !== 0) return index;
+      const createdAtOrder = a.createdAt - b.createdAt;
+      return createdAtOrder !== 0 ? createdAtOrder : a.id.localeCompare(b.id);
     });
   if (ordered.length === 0) return "";
   const currentFallbackIndex = ordered.findIndex((job) => job.id === current.id) + 1;
