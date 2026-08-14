@@ -6,6 +6,71 @@ import type { ChatCompleteFn, MessageSender } from "./turn-types.ts";
 import { makeCodexGlobal, makeDeps, makeGuildConfig, makeMessage } from "./handler-test-support.ts";
 
 describe("handleMessage", () => {
+  test("continues after a text-only message that requests another model turn", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: '<message continue="true">one moment</message>',
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      expect(request.messages.some((message) =>
+        message.role === "assistant"
+        && message.content === '<message continue="true">one moment</message>'
+      )).toBe(true);
+      return Promise.resolve({
+        text: "finished",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const sent: string[] = [];
+    const sender: MessageSender = (text) => {
+      sent.push(text);
+      return Promise.resolve({ sentMessageId: `sent-${sent.length}` });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(calls).toBe(2);
+    expect(sent).toEqual(["one moment", "finished"]);
+    expect(result.responseText).toBe("finished");
+  });
+
+  test("stops after two consecutive text-only continuations", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      return Promise.resolve({
+        text: `<message continue="true">step ${calls}</message>`,
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const sent: string[] = [];
+    const sender: MessageSender = (text) => {
+      sent.push(text);
+      return Promise.resolve({ sentMessageId: `sent-${sent.length}` });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(calls).toBe(3);
+    expect(sent).toEqual(["step 1", "step 2", "step 3"]);
+  });
+
   test("continues a background transcript through the normal actor loop", async () => {
     let executions = 0;
     const imageTool: AgentTool = {

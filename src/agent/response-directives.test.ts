@@ -128,6 +128,30 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("requests another model turn from only the final message", () => {
+    expect(parseResponseDirectives('<message>first</message><message continue="true">second</message>')).toEqual({
+      ignored: false,
+      continueResponse: true,
+      segments: [
+        { kind: "text", text: "first" },
+        { kind: "messageBreak", delivery: { continueResponse: true } },
+        { kind: "text", text: "second" },
+      ],
+    });
+    expect(parseResponseDirectives('<message continue="false">done</message>')).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "messageBreak", delivery: { continueResponse: false } },
+        { kind: "text", text: "done" },
+      ],
+    });
+    expect(parseResponseDirectives('<message continue="true">first</message><message>second</message>')).toEqual({
+      ignored: false,
+      directiveErrors: ['Attribute "continue" may be "true" only on the final <message>.'],
+      segments: [],
+    });
+  });
+
   test("extracts one multiline handoff from each message without changing visible text", () => {
     expect(parseResponseDirectives([
       '<message channel_id="chan-2">',

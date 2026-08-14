@@ -12,6 +12,7 @@ import { abortReason, abortable, assertActionCanCommit, completeModelTurnWithRet
 import { agentTimeBudgetExhaustedMessage, toolBudgetExhaustedMessage, toolToOpenRouterTool } from "./turn-prompt.ts";
 
 const MAX_INTERNAL_SKILL_LOADS_PER_LOOP = 8;
+const MAX_CONSECUTIVE_TEXT_CONTINUATIONS = 2;
 
 function parseToolArguments(call: OpenRouterToolCall): Record<string, unknown> {
   let parsed: unknown;
@@ -326,6 +327,7 @@ export async function runNativeToolLoop(input: {
   let agentTimeBudgetMarked = false;
   let asyncImageJobCreated = false;
   let correctedInvalidMessageDirectives = false;
+  let consecutiveTextContinuations = 0;
   const allowEmptyFinalResponse = (): boolean => typeof input.allowEmptyFinalResponse === "function"
     ? input.allowEmptyFinalResponse()
     : input.allowEmptyFinalResponse === true;
@@ -435,6 +437,7 @@ export async function runNativeToolLoop(input: {
     await input.beforeModelTurn?.(input.messages);
     let result: OpenRouterChatResult;
     let completedVisibleMessage = false;
+    const hasCompletedVisibleMessage = (): boolean => completedVisibleMessage;
     try {
       input.toolTiming?.markModelTurnStart();
       result = await completeModelTurnWithRetries({
@@ -463,7 +466,7 @@ export async function runNativeToolLoop(input: {
           completedVisibleMessage = false;
           input.onModelTurnStart?.(undefined);
         },
-        hasCompletedVisibleMessage: () => completedVisibleMessage,
+        hasCompletedVisibleMessage,
         requestLog: input.requestLog,
         log: input.log,
       });
@@ -487,6 +490,7 @@ export async function runNativeToolLoop(input: {
       throw error;
     }
     if (result.toolCalls.length > 0) {
+      consecutiveTextContinuations = 0;
       assertActionCanCommit(input.signal, "Agent loop aborted before tool execution.");
       input.onActionCommitted?.();
     }
@@ -499,11 +503,10 @@ export async function runNativeToolLoop(input: {
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
-      const parsedDirectives = input.correctInvalidMessageDirectives === true
-        ? parseResponseDirectives(text)
-        : undefined;
+      const parsedDirectives = parseResponseDirectives(text);
       if (
-        parsedDirectives?.directiveErrors !== undefined
+        input.correctInvalidMessageDirectives === true
+        && parsedDirectives.directiveErrors !== undefined
         && !correctedInvalidMessageDirectives
         && !streamingState.visibleText
       ) {
@@ -518,6 +521,29 @@ export async function runNativeToolLoop(input: {
         });
         continue;
       }
+
+      if (parsedDirectives.continueResponse === true) {
+        input.messages.push(assistantMessageFromResult({ ...result, text }));
+        if (consecutiveTextContinuations >= MAX_CONSECUTIVE_TEXT_CONTINUATIONS) {
+          input.log?.warn("native reply text continuation cap reached", {
+            maxConsecutiveContinuations: MAX_CONSECUTIVE_TEXT_CONTINUATIONS,
+          });
+          return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
+        }
+
+        let sent = hasCompletedVisibleMessage();
+        if (!sent && input.sendIntermediateText !== undefined) {
+          sent = await input.sendIntermediateText(text, undefined);
+        }
+        if (sent) {
+          sentIntermediateStatus = true;
+          input.onActionCommitted?.();
+          await input.onStillWorking?.(undefined);
+        }
+        consecutiveTextContinuations += 1;
+        continue;
+      }
+
       input.messages.push(assistantMessageFromResult({ ...result, text }));
       return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
     }

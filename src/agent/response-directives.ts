@@ -13,6 +13,8 @@ export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
+  /** Request another model turn after this message when no tool call already continues the loop. */
+  continueResponse?: boolean;
   assetIds?: AssetRef[];
 }
 
@@ -24,6 +26,8 @@ export interface ParsedResponseDirectives {
   /** Authored private monologue removed from every user-visible transport. */
   privateThoughts?: string[];
   malformedPrivateOutput?: boolean;
+  /** The final visible message explicitly keeps this response run active. */
+  continueResponse?: boolean;
   segments: ResponseSegment[];
 }
 
@@ -259,7 +263,7 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
   const parsed = parseAttributes(attrs);
   const errors = [...parsed.errors];
   const seen = new Set<string>();
-  const supported = new Set(["channel_id", "reply", "reply_to", "keep_typing", "asset_ids"]);
+  const supported = new Set(["channel_id", "reply", "reply_to", "keep_typing", "continue", "asset_ids"]);
 
   for (const attribute of parsed.attributes) {
     const { name, value } = attribute;
@@ -276,14 +280,16 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
     if (name === "channel_id") {
       if (value === "") errors.push('Attribute "channel_id" must not be empty.');
       else delivery.channelId = value;
-    } else if (name === "reply" || name === "keep_typing") {
+    } else if (name === "reply" || name === "keep_typing" || name === "continue") {
       const normalized = value.toLowerCase();
       if (normalized !== "true" && normalized !== "false") {
         errors.push(`Attribute "${name}" must be "true" or "false".`);
       } else if (name === "reply") {
         delivery.reply = normalized === "true";
-      } else {
+      } else if (name === "keep_typing") {
         delivery.keepTyping = normalized === "true";
+      } else {
+        delivery.continueResponse = normalized === "true";
       }
     } else if (name === "reply_to") {
       if (value === "") errors.push('Attribute "reply_to" must not be empty.');
@@ -304,6 +310,7 @@ function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; erro
     || delivery.reply !== undefined
     || delivery.replyTo !== undefined
     || delivery.keepTyping !== undefined
+    || delivery.continueResponse !== undefined
     || delivery.assetIds !== undefined;
   return { ...(hasDelivery ? { delivery } : {}), errors };
 }
@@ -521,15 +528,54 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   }
   const context: ParseContext = { directiveErrors: [], malformedPrivateOutput: false };
   const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null, context);
+  const segments = normalizeMessageBreaks(parsed.segments);
+  const continuation = continuationDirective(segments);
+  if (continuation.misplaced) {
+    context.directiveErrors.push('Attribute "continue" may be "true" only on the final <message>.');
+  }
   return {
     ignored: parsed.ignored,
     ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
     ...(context.directiveErrors.length > 0 ? { directiveErrors: context.directiveErrors } : {}),
     ...(privateResult.thoughts.length > 0 ? { privateThoughts: privateResult.thoughts } : {}),
     ...(context.malformedPrivateOutput ? { malformedPrivateOutput: true } : {}),
+    ...(continuation.requested && context.directiveErrors.length === 0 && !context.malformedPrivateOutput
+      ? { continueResponse: true }
+      : {}),
     segments: parsed.ignored || context.directiveErrors.length > 0 || context.malformedPrivateOutput
       ? []
-      : normalizeMessageBreaks(parsed.segments),
+      : segments,
+  };
+}
+
+function continuationDirective(segments: ResponseSegment[]): { requested: boolean; misplaced: boolean } {
+  const messages: Array<{ hasOutput: boolean; continueResponse: boolean }> = [];
+  let current = { hasOutput: false, continueResponse: false };
+
+  const finishCurrent = (): void => {
+    if (current.hasOutput) messages.push(current);
+    current = { hasOutput: false, continueResponse: false };
+  };
+
+  for (const segment of segments) {
+    if (segment.kind === "text" || segment.kind === "voice") {
+      current.hasOutput = true;
+      continue;
+    }
+    if (segment.kind === "emptyMessage") {
+      finishCurrent();
+      messages.push({ hasOutput: true, continueResponse: segment.delivery.continueResponse === true });
+      continue;
+    }
+    if (current.hasOutput) finishCurrent();
+    current.continueResponse = segment.delivery?.continueResponse === true;
+  }
+  finishCurrent();
+
+  const lastIndex = messages.length - 1;
+  return {
+    requested: lastIndex >= 0 && messages[lastIndex]?.continueResponse === true,
+    misplaced: messages.some((message, index) => message.continueResponse && index !== lastIndex),
   };
 }
 
