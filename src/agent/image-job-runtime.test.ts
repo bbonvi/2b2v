@@ -200,5 +200,9 @@ describe("image job runtime", () => {
     });
     expect(modelCalls).toBe(2);
     expect(imageCalls).toBe(1);
+    expect(jobs.get(ready.id)).toMatchObject({
+      status: "ready",
+      readyNotificationPending: false,
+    });
   });
 });

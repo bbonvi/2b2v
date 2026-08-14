@@ -506,7 +506,8 @@ export const SCHEMA_SQL = `
     replacement_count       INTEGER NOT NULL DEFAULT 0,
     cancel_reason           TEXT,
     status_changed_at       INTEGER NOT NULL DEFAULT 0,
-    handoff_notified_at     INTEGER
+    handoff_notified_at     INTEGER,
+    ready_notification_pending INTEGER NOT NULL DEFAULT 0 CHECK(ready_notification_pending IN (0, 1))
   );
 
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_source_scope

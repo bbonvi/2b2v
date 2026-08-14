@@ -731,12 +731,10 @@ void backgroundTasks.track(backfillMessageAssets({
 });
 ambientRuntime.startAmbientInitiativeLoops();
 privateLifeRuntime.start();
-for (const row of db.raw.prepare(
-  "SELECT id FROM agent_jobs WHERE kind = 'image_generation' AND status IN ('queued', 'ready') ORDER BY completed_at ASC, created_at ASC",
-).all() as Array<{ id: string }>) {
-  void imageJobTasks.track(runImageGenerationJob(row.id)).catch((error: unknown) => {
+for (const jobId of agentJobs.listRecoverableImageJobIds()) {
+  void imageJobTasks.track(runImageGenerationJob(jobId)).catch((error: unknown) => {
     log.error("image job recovery failed", {
-      jobId: row.id,
+      jobId,
       error: error instanceof Error ? error.message : String(error),
     });
   });

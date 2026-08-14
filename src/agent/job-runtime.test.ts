@@ -158,6 +158,24 @@ describe("AgentJobStore", () => {
     expect(recovered !== undefined && "startedAt" in recovered).toBe(false);
   });
 
+  test("recovers each ready image notification only once", () => {
+    const job = enqueueImage({ now: 1_000 }).job;
+    expect(store.listRecoverableImageJobIds()).toEqual([job.id]);
+
+    store.start(job.id, undefined, 1_500);
+    const ready = store.markReady(job.id, { filename: "generated.webp" }, 2_000);
+    expect(ready).toMatchObject({ status: "ready", readyNotificationPending: true });
+    expect(store.listRecoverableImageJobIds()).toEqual([job.id]);
+
+    expect(store.markReadyNotificationHandled(job.id, 1_999)).toBe(false);
+    expect(store.markReadyNotificationHandled(job.id, 2_000)).toBe(true);
+    expect(store.get(job.id)).toMatchObject({ status: "ready", readyNotificationPending: false });
+    expect(store.listRecoverableImageJobIds()).toEqual([]);
+
+    const restarted = new AgentJobStore(db, config);
+    expect(restarted.listRecoverableImageJobIds()).toEqual([]);
+  });
+
   test("persists follow-ups and resumes a yielded background agent", () => {
     const job = enqueueAgent();
     store.start(job.id);

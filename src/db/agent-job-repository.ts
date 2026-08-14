@@ -30,6 +30,7 @@ export interface AgentJobRecord {
   cancelReason: string | null;
   statusChangedAt: number;
   handoffNotifiedAt: number | null;
+  readyNotificationPending: number;
 }
 
 export interface AgentJobRecordPatch {
@@ -43,6 +44,7 @@ export interface AgentJobRecordPatch {
   cancelReason?: string | null;
   statusChangedAt?: number;
   handoffNotifiedAt?: number | null;
+  readyNotificationPending?: number;
 }
 
 export interface AgentJobEventRecord {
@@ -64,8 +66,8 @@ export function createAgentJobRecord(db: Database, record: AgentJobRecord): void
      requester_id, requester_username, source_message_id, source_quote, status,
      input_json, checkpoint_json, result_json, error, created_at, started_at, completed_at,
      sent_message_id, replacement_root_job_id, replaces_job_id, replacement_count,
-     cancel_reason, status_changed_at, handoff_notified_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+     cancel_reason, status_changed_at, handoff_notified_at, ready_notification_pending)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       record.id,
       record.kind,
@@ -93,6 +95,7 @@ export function createAgentJobRecord(db: Database, record: AgentJobRecord): void
       record.cancelReason,
       record.statusChangedAt,
       record.handoffNotifiedAt,
+      record.readyNotificationPending,
     );
 }
 
@@ -117,6 +120,7 @@ export function updateAgentJobRecord(db: Database, id: string, patch: AgentJobRe
     ["cancelReason", "cancel_reason"],
     ["statusChangedAt", "status_changed_at"],
     ["handoffNotifiedAt", "handoff_notified_at"],
+    ["readyNotificationPending", "ready_notification_pending"],
   ];
   for (const [key, column] of fields) {
     const value = patch[key];
@@ -284,6 +288,7 @@ interface AgentJobRow {
   cancel_reason: string | null;
   status_changed_at: number;
   handoff_notified_at: number | null;
+  ready_notification_pending: number;
 }
 
 interface AgentJobEventRow {
@@ -324,6 +329,7 @@ function toRecord(row: AgentJobRow): AgentJobRecord {
     cancelReason: row.cancel_reason,
     statusChangedAt: row.status_changed_at,
     handoffNotifiedAt: row.handoff_notified_at,
+    readyNotificationPending: row.ready_notification_pending,
   };
 }
 

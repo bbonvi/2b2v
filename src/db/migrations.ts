@@ -465,6 +465,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE agent_jobs ADD COLUMN checkpoint_json TEXT",
     "ALTER TABLE agent_jobs ADD COLUMN status_changed_at INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE agent_jobs ADD COLUMN handoff_notified_at INTEGER",
+    "ALTER TABLE agent_jobs ADD COLUMN ready_notification_pending INTEGER NOT NULL DEFAULT 0 CHECK(ready_notification_pending IN (0, 1))",
   ]) {
     ignoreExistingColumn(raw, sql);
   }

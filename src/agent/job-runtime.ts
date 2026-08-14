@@ -123,6 +123,7 @@ interface AgentJobBase {
 
 export type ImageGenerationAgentJob = AgentJobBase & {
   kind: "image_generation";
+  readyNotificationPending: boolean;
   input: ImageGenerationJobInput;
   result?: ImageGenerationJobResult;
 };
@@ -235,6 +236,7 @@ export class AgentJobStore {
       sourceMessageId: input.sourceMessageId,
       sourceQuote: input.sourceQuote,
       status: "queued",
+      readyNotificationPending: false,
       createdAt: now,
       statusChangedAt: now,
       input: {
@@ -350,6 +352,14 @@ export class AgentJobStore {
       });
   }
 
+  /** List workers and ready notifications that still need restart recovery. */
+  listRecoverableImageJobIds(): string[] {
+    return (this.db.raw.prepare(`SELECT id FROM agent_jobs
+      WHERE kind = 'image_generation'
+        AND (status = 'queued' OR (status = 'ready' AND ready_notification_pending = 1))
+      ORDER BY completed_at ASC, created_at ASC`).all() as Array<{ id: string }>).map((row) => row.id);
+  }
+
   start(id: string, abort?: () => void, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
     if (job === undefined || job.status !== "queued") return job;
@@ -367,10 +377,26 @@ export class AgentJobStore {
     const job = this.get(id);
     if (job === undefined || job.kind !== "image_generation" || job.status !== "running") return job;
     updateAgentJobRecord(this.db, id, {
-      status: "ready", completedAt: null, statusChangedAt: now, resultJson: JSON.stringify(result),
+      status: "ready",
+      completedAt: null,
+      statusChangedAt: now,
+      resultJson: JSON.stringify(result),
+      readyNotificationPending: 1,
     });
     this.aborts.delete(id);
     return this.get(id);
+  }
+
+  markReadyNotificationHandled(id: string, expectedStatusChangedAt: number): boolean {
+    const job = this.get(id);
+    if (job === undefined
+        || job.kind !== "image_generation"
+        || job.status !== "ready"
+        || !job.readyNotificationPending
+        || job.statusChangedAt !== expectedStatusChangedAt) {
+      return false;
+    }
+    return updateAgentJobRecord(this.db, id, { readyNotificationPending: 0 });
   }
 
   pendingEvents(id: string): PendingAgentEvent[] {
@@ -707,6 +733,7 @@ function toRecord(job: AgentJob): AgentJobRecord {
     cancelReason: job.cancelReason ?? null,
     statusChangedAt: job.statusChangedAt,
     handoffNotifiedAt: job.handoffNotifiedAt ?? null,
+    readyNotificationPending: job.kind === "image_generation" && job.readyNotificationPending ? 1 : 0,
   };
 }
 
@@ -738,7 +765,13 @@ function fromRecord(record: AgentJobRecord): AgentJob {
   if (record.kind === "image_generation") {
     const input = JSON.parse(record.inputJson) as ImageGenerationJobInput;
     const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as ImageGenerationJobResult;
-    return { ...base, kind: "image_generation", input, ...(result !== undefined ? { result } : {}) };
+    return {
+      ...base,
+      kind: "image_generation",
+      readyNotificationPending: record.readyNotificationPending === 1,
+      input,
+      ...(result !== undefined ? { result } : {}),
+    };
   }
   if (record.kind !== "background_agent") throw new Error(`Unknown agent job kind: ${record.kind}`);
   const input = JSON.parse(record.inputJson) as BackgroundAgentJobInput;

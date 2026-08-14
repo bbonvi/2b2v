@@ -66,6 +66,7 @@ test("renders compact actual metadata and conditional 4K guidance", () => {
 test("renders image jobs from one model loop in request order", () => {
   const base = {
     kind: "image_generation" as const,
+    readyNotificationPending: false,
     guildId: "g1",
     channelId: "c1",
     deliveryGuildId: "g1",
@@ -133,6 +134,7 @@ test("renders compact actual prompts and durable output assets in job context", 
   const rendered = renderAgentJobsContext([{
     id: "img-abc123",
     kind: "image_generation",
+    readyNotificationPending: false,
     guildId: "g1",
     channelId: "c1",
     deliveryGuildId: "g1",

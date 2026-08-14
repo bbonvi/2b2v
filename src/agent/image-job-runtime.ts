@@ -353,6 +353,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         event: "ready",
         instruction: completionInstruction,
       });
+      agentJobs.markReadyNotificationHandled(current.id, current.statusChangedAt);
     });
     return sentMessageId;
   };

@@ -400,6 +400,7 @@ describe("createCodexGenerateImageTool", () => {
           job: {
             id: "img-1",
             kind: "image_generation",
+            readyNotificationPending: false,
             guildId: "g1",
             channelId: "c1",
             deliveryGuildId: "g1",
@@ -443,6 +444,7 @@ describe("createCodexGenerateImageTool", () => {
         job: {
           id: "img-latest",
           kind: "image_generation",
+          readyNotificationPending: false,
           guildId: "g1",
           channelId: "c1",
           deliveryGuildId: "g1",
@@ -490,6 +492,7 @@ describe("createCodexGenerateImageTool", () => {
           job: {
             id: "img-1",
             kind: "image_generation",
+            readyNotificationPending: false,
             guildId: "g1",
             channelId: "c1",
             deliveryGuildId: "g1",
@@ -622,6 +625,7 @@ describe("createCodexGenerateImageTool", () => {
           job: {
             id: "img-web",
             kind: "image_generation",
+            readyNotificationPending: false,
             guildId: "g1",
             channelId: "c1",
             deliveryGuildId: "g1",

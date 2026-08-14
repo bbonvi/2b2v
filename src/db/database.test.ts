@@ -170,6 +170,12 @@ describe("database initialization", () => {
       replacement_count INTEGER NOT NULL DEFAULT 0,
       cancel_reason TEXT
     )`);
+    legacy.run(`INSERT INTO agent_jobs
+      (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+       requester_id, requester_username, source_message_id, source_quote, status,
+       input_json, created_at, replacement_count)
+      VALUES ('img-ready', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+       'u1', 'alice', 'm1', 'quote', 'ready', '{}', 1, 0)`);
     legacy.close();
 
     const migrated = createDatabase(dbPath);
@@ -180,6 +186,10 @@ describe("database initialization", () => {
       ).get() as { name: string } | undefined;
       expect(columns.some((column) => column.name === "parent_job_id")).toBe(true);
       expect(columns.some((column) => column.name === "checkpoint_json")).toBe(true);
+      expect(columns.some((column) => column.name === "ready_notification_pending")).toBe(true);
+      expect(migrated.raw.prepare(
+        "SELECT ready_notification_pending FROM agent_jobs WHERE id = 'img-ready'",
+      ).get()).toEqual({ ready_notification_pending: 0 });
       expect(index?.name).toBe("idx_agent_jobs_parent");
     } finally {
       migrated.close();
