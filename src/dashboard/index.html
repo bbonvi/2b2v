@@ -265,13 +265,22 @@
   }
   .cost-bar {
     min-width: 5px;
-    height: max(2px, var(--cost-height));
+    height: 100%;
     flex: 1;
+    position: relative;
+  }
+  .cost-bar::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: max(2px, var(--cost-height));
     background: #21643d;
     transition: background .12s, height .12s;
   }
-  .cost-bar:hover { background: #55d987; }
-  .cost-bar.today {
+  .cost-bar:hover::after { background: #55d987; }
+  .cost-bar.today::after {
     background: var(--green);
     box-shadow: 0 0 8px rgba(34,197,94,.28);
   }
@@ -3105,7 +3114,14 @@
     return params;
   }
 
+  let renderedCostTrendKey = null;
+
   function renderCostTrend(days) {
+    const trendKey = Array.isArray(days)
+      ? days.map(day => String(day.date) + ':' + (Number(day.estimatedCostUsd) || 0)).join('|')
+      : '';
+    if (trendKey === renderedCostTrendKey) return;
+    renderedCostTrendKey = trendKey;
     if (!Array.isArray(days) || days.length === 0) {
       costTrend.replaceChildren();
       return;

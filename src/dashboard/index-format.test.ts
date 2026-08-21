@@ -16,6 +16,11 @@ interface TriggerHelpers {
   mainEntryTrigger(entry: { requests?: Array<{ trigger?: unknown }>; authorUsername?: string }): unknown;
 }
 
+interface CostTrendHelpers {
+  renderCostTrend(days: Array<{ date: string; estimatedCostUsd: number }>): void;
+  costTrend: { writes: number; html: string };
+}
+
 function loadDashboardScript(): string {
   const html = readFileSync("src/dashboard/index.html", "utf8");
   const match = html.match(/<script>\n([\s\S]*)\n<\/script>/);
@@ -99,6 +104,34 @@ function loadTriggerHelpers(): TriggerHelpers {
 
   if (context.extracted === undefined) {
     throw new Error("Failed to load trigger helpers");
+  }
+
+  return context.extracted;
+}
+
+function loadCostTrendHelpers(): CostTrendHelpers {
+  const html = readFileSync("src/dashboard/index.html", "utf8");
+  const helperStart = html.indexOf("let renderedCostTrendKey =");
+  const helperEnd = html.indexOf("  async function fetchLogs", helperStart);
+  if (helperStart < 0 || helperEnd < 0) {
+    throw new Error("cost trend helper block not found in dashboard HTML");
+  }
+  const helperCode = [
+    `const costTrend = {
+      writes: 0,
+      html: "",
+      replaceChildren() { this.html = ""; this.writes++; },
+      set innerHTML(value) { this.html = value; this.writes++; },
+      get innerHTML() { return this.html; },
+    };`,
+    "function esc(value) { return String(value); }",
+    html.slice(helperStart, helperEnd),
+  ].join("\n");
+  const context: { extracted?: CostTrendHelpers } = {};
+  runInNewContext(`${helperCode}; extracted = { renderCostTrend, costTrend };`, context);
+
+  if (context.extracted === undefined) {
+    throw new Error("Failed to load cost trend helpers");
   }
 
   return context.extracted;
@@ -227,6 +260,28 @@ describe("dashboard payload formatter", () => {
 });
 
 describe("dashboard lifecycle formatting", () => {
+  test("keeps the cost chart DOM when its data does not change", () => {
+    const helpers = loadCostTrendHelpers();
+    const firstDay = { date: "2026-08-20", estimatedCostUsd: 1 };
+    const days = [
+      firstDay,
+      { date: "2026-08-21", estimatedCostUsd: 2 },
+    ];
+
+    helpers.renderCostTrend(days);
+    const firstHtml = helpers.costTrend.html;
+    helpers.renderCostTrend(days.map((day) => ({ ...day })));
+
+    expect(helpers.costTrend.writes).toBe(1);
+    expect(helpers.costTrend.html).toBe(firstHtml);
+
+    helpers.renderCostTrend([
+      firstDay,
+      { date: "2026-08-21", estimatedCostUsd: 3 },
+    ]);
+    expect(helpers.costTrend.writes).toBe(2);
+  });
+
   test("uses collapsible request phases with every phase closed by default", () => {
     const script = loadDashboardScript();
 
