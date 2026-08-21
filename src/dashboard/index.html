@@ -214,12 +214,71 @@
     .mode-timeline-value { overflow-x: auto; }
   }
 
+  .log-summary {
+    max-width: 1200px;
+    min-height: 46px;
+    margin: 0 auto .75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
   .log-count {
     font-size: .65rem;
     color: var(--text-dim);
-    margin-bottom: .75rem;
     text-transform: uppercase;
     letter-spacing: .1em;
+  }
+  .cost-trend {
+    width: 228px;
+    height: 38px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: .65rem;
+    flex: 0 0 auto;
+  }
+  .cost-trend-label {
+    display: grid;
+    gap: .08rem;
+    color: var(--text-dim);
+    font-size: .53rem;
+    letter-spacing: .1em;
+    line-height: 1.2;
+    text-align: right;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .cost-trend-label strong {
+    color: var(--green);
+    font-size: .62rem;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  .cost-bars {
+    height: 30px;
+    display: flex;
+    align-items: end;
+    gap: 3px;
+    border-bottom: 1px solid var(--border-active);
+  }
+  .cost-bar {
+    min-width: 5px;
+    height: max(2px, var(--cost-height));
+    flex: 1;
+    background: #21643d;
+    transition: background .12s, height .12s;
+  }
+  .cost-bar:hover { background: #55d987; }
+  .cost-bar.today {
+    background: var(--green);
+    box-shadow: 0 0 8px rgba(34,197,94,.28);
+  }
+  @media (max-width: 800px) {
+    .log-summary { align-items: stretch; flex-direction: column; gap: .35rem; padding-bottom: .5rem; }
+    .cost-trend { width: min(100%, 280px); }
+    .cost-trend-label { text-align: left; }
   }
   #log-list {
     max-width: 1200px;
@@ -2025,7 +2084,10 @@
 </section>
 
 <div class="content" id="log-view">
-  <div class="log-count" id="log-count"></div>
+  <div class="log-summary">
+    <div class="log-count" id="log-count"></div>
+    <div class="cost-trend" id="cost-trend" aria-label="Estimated daily cost for the last 14 days"></div>
+  </div>
   <div id="log-list"></div>
 </div>
 
@@ -2167,6 +2229,7 @@
 (function(){
   const logList = document.getElementById('log-list');
   const logCount = document.getElementById('log-count');
+  const costTrend = document.getElementById('cost-trend');
   const fGuild = document.getElementById('f-guild');
   const fChannel = document.getElementById('f-channel');
   const fUser = document.getElementById('f-user');
@@ -3042,6 +3105,25 @@
     return params;
   }
 
+  function renderCostTrend(days) {
+    if (!Array.isArray(days) || days.length === 0) {
+      costTrend.replaceChildren();
+      return;
+    }
+    const max = Math.max(...days.map(day => Number(day.estimatedCostUsd) || 0));
+    const total = days.reduce((sum, day) => sum + (Number(day.estimatedCostUsd) || 0), 0);
+    const today = new Date().toISOString().slice(0, 10);
+    const bars = days.map(day => {
+      const cost = Number(day.estimatedCostUsd) || 0;
+      const height = max === 0 ? 0 : Math.max(8, cost / max * 100);
+      const label = new Date(day.date + 'T12:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return '<span class="cost-bar' + (day.date === today ? ' today' : '') + '" style="--cost-height:' + height.toFixed(1)
+        + '%" title="' + esc(label + ' · $' + cost.toFixed(4)) + '"></span>';
+    }).join('');
+    costTrend.innerHTML = '<span class="cost-trend-label">14 days<strong>$' + total.toFixed(2) + '</strong></span>'
+      + '<span class="cost-bars" role="img" aria-label="Daily estimated cost bars">' + bars + '</span>';
+  }
+
   async function fetchLogs() {
     const requestQuery = currentLogParams().toString();
     const r = await fetch('/api/log-groups?' + requestQuery);
@@ -3050,6 +3132,7 @@
     if (currentLogParams().toString() !== requestQuery) return;
     const data = body.groups || [];
     const totals = body.totals || {};
+    renderCostTrend(totals.estimatedCostByDay);
 
     const costs = '24h <span class="entry-cost">$' + Number(totals.estimatedCostLast24HoursUsd || 0).toFixed(2) + '</span>'
       + ' · 7d <span class="entry-cost">$' + Number(totals.estimatedCostLast7DaysUsd || 0).toFixed(2) + '</span>'

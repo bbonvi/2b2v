@@ -120,6 +120,7 @@ describe("RequestLogStore", () => {
     expect(page.totals.estimatedCostLast24HoursUsd).toBe(0);
     expect(page.totals.estimatedCostLast7DaysUsd).toBe(0);
     expect(page.totals.estimatedCostLast31DaysUsd).toBe(0);
+    expect(page.totals.estimatedCostByDay).toHaveLength(14);
     expect(page.totals.firstRecordedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
@@ -145,6 +146,44 @@ describe("RequestLogStore", () => {
     expect(totals.estimatedCostLast24HoursUsd).toBe(1);
     expect(totals.estimatedCostLast7DaysUsd).toBe(3);
     expect(totals.estimatedCostLast31DaysUsd).toBe(7);
+    expect(totals.estimatedCostByDay.reduce((sum, day) => sum + day.estimatedCostUsd, 0)).toBe(3);
+  });
+
+  test("daily costs include zero days and active requests", () => {
+    const store = new RequestLogStore();
+    const today = new Date().toISOString().slice(0, 10);
+    store.push(makeEntry({
+      requestId: "stored",
+      timestamp: `${today}T01:00:00.000Z`,
+      llmCalls: [{
+        model: "model",
+        promptTokens: 1,
+        completionTokens: 1,
+        totalTokens: 2,
+        estimatedCostUsd: 1.25,
+        stopReason: "stop",
+        contentTypes: ["text"],
+      }],
+    }));
+    store.upsertActive(makeEntry({
+      requestId: "active",
+      status: "active",
+      timestamp: `${today}T02:00:00.000Z`,
+      llmCalls: [{
+        model: "model",
+        promptTokens: 1,
+        completionTokens: 1,
+        totalTokens: 2,
+        estimatedCostUsd: 0.75,
+        stopReason: "streaming",
+        contentTypes: ["text"],
+      }],
+    }));
+
+    const costs = store.queryGroupPage().totals.estimatedCostByDay;
+    expect(costs).toHaveLength(14);
+    expect(costs.at(-1)).toEqual({ date: today, estimatedCostUsd: 2 });
+    expect(costs.slice(0, -1).every((day) => day.estimatedCostUsd === 0)).toBe(true);
   });
 
   test("query sorts by request timestamp, not emit order", () => {
