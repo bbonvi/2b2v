@@ -44,8 +44,5 @@
     "turndown": "^7.2.2",
     "typebox": "1.1.38",
     "yaml": "^2.8.2"
-  },
-  "patchedDependencies": {
-    "@earendil-works/pi-ai@0.83.0": "patches/@earendil-works%2Fpi-ai@0.83.0.patch"
   }
 }
