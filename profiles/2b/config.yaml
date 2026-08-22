@@ -74,7 +74,7 @@ privateLife:
     wallClockTimeoutMs: 500000 # (wall-clock budget for one private-life actor turn and its maintenance)
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 10
+    opportunitiesPerDay: 5
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
@@ -109,10 +109,10 @@ privateLife:
         creative-aesthetic: 0.09
         mundane-private: 0.10
         embodied: 0.08
-        sexual: 0.03
+        sexual: 0.08
         social-personal: 0.08
         community: 0.03
-        transgressive-ugly: 0.03
+        transgressive-ugly: 0.04
         playful-absurd: 0.07
     actionScopeWeights:
         reflect-only: 0.55
@@ -262,14 +262,14 @@ semanticMaintenance:
     burst:
         enabled: true
         modelProfile: maintenance
-        quietAfter: 5m
-        maxWait: 10m
+        quietAfter: 10m
+        maxWait: 15m
         memoryMaxRows: 300
         memoryMaxChars: 60000
     sweep:
         enabled: true
         modelProfile: maintenance
-        every: 6h
+        every: 8h
         memories: { maxRows: 300, maxChars: 60000 }
         relationships: { maxProfiles: 12, maxChars: 60000 }
         innerThreads: { maxRows: 100, maxChars: 60000 }
@@ -290,7 +290,7 @@ relationships:
         enabled: true
         maxExchanges: 6
         maxMessageChars: 700
-        refreshMinutes: 10
+        refreshMinutes: 30
     maxAxisDeltaPerSignal: 200
     maxToolCalls: 5
 
@@ -392,16 +392,16 @@ triggers:
         - "тубишка"
         - "туби"
         - "тубик"
-    randomChance: 0.001 # (0-1 probability of responding to any message)
-    keywordDebounceMs: 2000 # (wait this long after a keyword trigger before replying)
+    randomChance: 0.0 # (0-1 probability of responding to any message)
+    keywordDebounceMs: 3000 # (wait this long after a keyword trigger before replying)
     typingIdleMs: 10000 # (treat typingStart from the triggering user as active for this long)
     typingResumeGraceMs: 5000 # (brief wait after a same-user chunk to catch continued typing)
     typingMaxWaitMs: 120000 # (hard cap for typing-aware keyword/mention waits)
 
 dispatcher:
     enabled: true # (serialize/debounce per-channel message handling)
-    mentionDebounceMs: 2000 # (used for mentions only when typing-aware waits are disabled)
-    defaultDebounceMs: 2000 # (debounce for non-mention dispatcher batches)
+    mentionDebounceMs: 3000 # (used for mentions only when typing-aware waits are disabled)
+    defaultDebounceMs: 3000 # (debounce for non-mention dispatcher batches)
 
 typingSimulation:
     enabled: true # (pace Discord typing indicators and outgoing segments)
